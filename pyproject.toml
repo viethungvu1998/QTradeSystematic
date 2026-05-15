@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qtradesystematic"
+version = "0.1.0"
+description = "Config-driven systematic trading platform for stocks and crypto."
+readme = "CODEX.md"
+requires-python = ">=3.13"
+license = { text = "Proprietary" }
+authors = [
+  { name = "QTradeSystematic Contributors" },
+]
+dependencies = [
+  "duckdb>=1.4.0",
+  "numpy>=2.1.0",
+  "polars>=1.31.0",
+  "pyarrow>=20.0.0",
+  "PyYAML>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.0",
+  "pytest-asyncio>=1.0.0",
+  "pytest-cov>=6.2.0",
+  "ruff>=0.11.0",
+]
+data = [
+  "httpx>=0.28.0",
+]
+research = [
+  "xgboost>=3.0.0",
+]
+execution = [
+  "binance-connector>=3.12.0",
+  "futu-api>=9.4.0",
+  "python-dotenv>=1.0.0",
+]
+orchestration = [
+  "prefect>=3.4.0",
+]
+all = [
+  "qtradesystematic[data,research,execution,orchestration,dev]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["qts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+  "paper: requires paper or sandbox broker accounts",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N"]
