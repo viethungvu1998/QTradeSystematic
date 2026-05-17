@@ -8,10 +8,16 @@ from typing import AsyncIterator
 import polars as pl
 
 from qts.core.events import Tick
+from qts.data._schemas import DataType
 
 
 class BaseDataSource:
     """Contract for data providers."""
+
+    CAPABILITIES: frozenset[DataType] = frozenset()
+
+    async def fetch(self, data_type: DataType, symbol: str, **kwargs) -> pl.DataFrame:
+        raise NotImplementedError
 
     async def get_ohlcv(
         self,

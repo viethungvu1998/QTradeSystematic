@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import polars as pl
 
+from qts.core.registry import Registry
 from qts.research.features.base import BaseFeature
 
 
+@Registry.register_feature("forward_returns")
 class ForwardReturns(BaseFeature):
     """Target variable builder."""
 

@@ -6,9 +6,29 @@ from decimal import Decimal
 
 import polars as pl
 
-from qts.core.errors import BrokerError
+from qts.core.instrument import AssetType, Instrument
+from qts.orchestration.prefect_compat import task
+
+_CURRENCY_DEFAULT: dict[AssetType, str] = {
+    AssetType.STOCK: "USD",
+    AssetType.VN_STOCK: "VND",
+    AssetType.COMMODITY: "USD",
+    AssetType.CRYPTO: "",
+}
 
 
+def _instrument_for_symbol(symbol: str) -> Instrument:
+    asset_type = AssetType.from_symbol(symbol)
+    currency = symbol.split("/")[-1] if asset_type is AssetType.CRYPTO else _CURRENCY_DEFAULT[asset_type]
+    return Instrument(
+        symbol=symbol,
+        asset_type=asset_type,
+        exchange="AUTO",
+        currency=currency,
+    )
+
+
+@task(retries=2, retry_delay_seconds=60, name="sync-positions")
 async def sync_positions(config, syncer, brokers, target_weights: dict[str, Decimal], data: pl.DataFrame):
     """Compute rebalance orders."""
 
@@ -26,16 +46,13 @@ async def sync_positions(config, syncer, brokers, target_weights: dict[str, Deci
         row["symbol"]: Decimal(str(row["close"])) for row in latest.iter_rows(named=True)
     }
     instruments = {position.instrument.symbol: position.instrument for position in positions}
-    for symbol, price in latest_prices.items():
-        instruments.setdefault(symbol, next(position.instrument for position in positions if position.instrument.symbol == symbol) if positions and symbol in {position.instrument.symbol for position in positions} else None)
-    instruments = {symbol: instrument for symbol, instrument in instruments.items() if instrument is not None}
+    for symbol in target_weights:
+        instruments.setdefault(symbol, _instrument_for_symbol(symbol))
     return syncer.compute_deltas(target_weights, positions, instruments, latest_prices, account_value)
 
 
-async def execute_rebalance(router, orders):
+@task(retries=2, retry_delay_seconds=60, name="execute-rebalance")
+async def execute_rebalance(config, router, orders):
     """Execute generated orders."""
 
-    try:
-        return await router.execute(orders)
-    except BrokerError:
-        raise
+    return await router.execute(orders)

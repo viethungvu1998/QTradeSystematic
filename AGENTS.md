@@ -109,7 +109,7 @@ Testing rules specific to this project (three tiers):
 
 - Unit tests mock at the ABC boundary (`MockBroker(BaseBroker)`) — never mock internal methods.
 - Integration tests use a real DuckDB in-memory instance, never a mocked DB.
-- Backtest engine tests: run both `VectorBTProEngine` and `ZiplineEngine` on the same fixture data and assert `BacktestResult` schema is identical.
+- Backtest engine tests: run both `VectorBTProEngine` and `ZiplineReloadedEngine` on the same fixture data and assert `BacktestResult` schema is identical.
 - Paper tests connect to a paper/sandbox account only (Futu OpenD paper mode, Binance testnet). They verify `place_order` → `Fill` round-trips without spending real money. Mark with `@pytest.mark.paper`.
 - No test ever touches a live (real-money) broker account or production exchange API.
 
@@ -207,6 +207,37 @@ Install with `.venv/bin/pip`, and run Python, pytest, and tooling through `.venv
 
 No `if asset_type == "crypto"` in business logic. Route via the registry or the router. Add a new plugin; do not add a branch.
 
+### Strategy and Backtest Seams
+
+Treat `BaseStrategy.generate_signals(data)` as the single public strategy entrypoint and `BaseEngine.run(...)` as the single supported simulation entrypoint.
+
+Rules:
+- all strategies must emit the standard `SignalFrame`
+- strategy packages may keep diagnostics or research helpers, but not alternate public backtest APIs
+- do not add strategy-specific runners under `qts/research/backtest/`
+- stat-arb refactors must converge onto the shared engine seam instead of preserving special-case backtest flows
+
+### Strategy Family Structure
+
+Family-level `base.py` and `core.py` modules are allowed only when real shared behavior exists.
+
+Current guidance:
+- `factor/` may own shared factor-family bases and utilities
+- `stat_arb/` may own shared stat-arb bases and utilities
+- do not add empty `cross_sectional/` family scaffolding before the first concrete strategy exists
+- reusable family logic belongs in family modules, not in package bootstrap side effects or engine code
+
+### Registry-First Resolution
+
+When a registry seam already exists, use it uniformly.
+
+Apply this rule to:
+- strategy discovery and package bootstrap
+- storage construction
+- built-in feature resolution, including compatibility booleans such as `technical`, `fundamental`, `onchain`, and `forward_returns`
+
+Keep YAML compatibility unless the change explicitly includes a schema migration.
+
 ### Dependency Injection
 
 Concrete implementations are passed in — never instantiated inside a class that does not own them.
@@ -226,17 +257,15 @@ Concrete implementations are passed in — never instantiated inside a class tha
 **Monetary values:** always `Decimal`, never `float`.  
 **Bar timestamps:** `date` for calendar-aligned bars; `datetime` only for tick-level data.
 
-### Strategy Promotion Gate
+### Strategy Promotion
 
-A strategy is only promoted to live after passing both gates:
+Treat promotion as a manual review process, not a runtime-enforced workflow.
 
-```
-research.yaml  →  (metrics pass threshold)
-validation.yaml  →  (Sharpe degrades < 30%)
-live.yaml
-```
+Current state:
 
-Promotion is a code review, not a runtime decision. Config files are version-controlled.
+- `promotion_gate` is parsed from `validation` configs
+- `qts_flow` does not automatically compare research and validation results
+- moving from `research` to `validation` to `live` is currently a human decision supported by version-controlled config files
 
 ### Error Handling at Boundaries
 

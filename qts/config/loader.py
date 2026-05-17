@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -17,6 +16,7 @@ from qts.research.backtest.base import (
     DataSourcesConfig,
     FeaturesConfig,
     ForwardReturnsConfig,
+    IndicatorConfig,
     PromotionGateConfig,
     ScheduleConfig,
     StrategyConfig,
@@ -36,6 +36,8 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "features",
     "strategy",
     "backtest_engine",
+    "train_window",
+    "rebalance_frequency",
     "fill_model",
     "slippage_model",
     "commission",
@@ -99,6 +101,17 @@ def _as_date(value: str | None) -> date | None:
     return date.fromisoformat(value) if value else None
 
 
+def _normalize_backtest_engine(value: str | None) -> str:
+    if not value:
+        return "vectorbt"
+    normalized = value.strip().lower()
+    aliases = {
+        "fast": "vectorbt",
+        "normal": "zipline",
+    }
+    return aliases.get(normalized, normalized)
+
+
 def load_config(path: str | Path) -> BacktestConfig:
     """Parse and validate YAML into a typed config."""
 
@@ -115,7 +128,12 @@ def load_config(path: str | Path) -> BacktestConfig:
     universe = UniverseConfig(**raw.get("universe", {}))
     data_sources = DataSourcesConfig(**raw.get("data_sources", {}))
     features_payload = raw.get("features", {})
+    indicators = [
+        IndicatorConfig(name=item["name"], params=item.get("params", {}))
+        for item in features_payload.get("indicators", [])
+    ]
     features_config = FeaturesConfig(
+        indicators=indicators,
         technical=bool(features_payload.get("technical", False)),
         fundamental=bool(features_payload.get("fundamental", False)),
         onchain=bool(features_payload.get("onchain", False)),
@@ -135,7 +153,12 @@ def load_config(path: str | Path) -> BacktestConfig:
         storage=raw.get("storage", "duckdb"),
         features=features_config,
         strategy=StrategyConfig(**raw.get("strategy", {})),
-        backtest_engine=raw.get("backtest_engine", "fast"),
+        backtest_engine=_normalize_backtest_engine(raw.get("backtest_engine")),
+        train_window=raw.get("train_window", BacktestConfig.__dataclass_fields__["train_window"].default),
+        rebalance_frequency=raw.get(
+            "rebalance_frequency",
+            BacktestConfig.__dataclass_fields__["rebalance_frequency"].default,
+        ),
         fill_model=raw.get("fill_model"),
         slippage_model=raw.get("slippage_model"),
         commission=CommissionConfig(

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "qtradesystematic"
 version = "0.1.0"
 description = "Config-driven systematic trading platform for stocks and crypto."
-readme = "CODEX.md"
+readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "Proprietary" }
 authors = [
@@ -30,8 +30,17 @@ dev = [
 data = [
   "httpx>=0.28.0",
 ]
+vn = [
+  "vnstock>=4.0.0",
+]
 research = [
+  "matplotlib>=3.9.0",
+  "statsmodels>=0.14.0",
   "xgboost>=3.0.0",
+  "vectorbtpro @ file:./lib/vectorbt.pro-main",
+]
+zipline = [
+  "zipline-reloaded>=3.1.1",
 ]
 execution = [
   "binance-connector>=3.12.0",
@@ -42,11 +51,14 @@ orchestration = [
   "prefect>=3.4.0",
 ]
 all = [
-  "qtradesystematic[data,research,execution,orchestration,dev]",
+  "qtradesystematic[data,vn,research,zipline,execution,orchestration,dev]",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["qts"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

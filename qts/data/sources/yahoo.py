@@ -8,7 +8,7 @@ import polars as pl
 
 from qts.core.errors import DataSourceError
 from qts.core.registry import Registry
-from qts.data._schemas import OHLCV_COLUMNS
+from qts.data._schemas import DataType, OHLCV_COLUMNS
 from qts.data.base import BaseDataSource
 
 
@@ -16,8 +16,20 @@ from qts.data.base import BaseDataSource
 class YahooDataSource(BaseDataSource):
     """Fixture-friendly Yahoo adapter."""
 
+    CAPABILITIES = frozenset({DataType.OHLCV})
+
     def __init__(self, ohlcv_payloads: dict[str, pl.DataFrame] | None = None) -> None:
         self.ohlcv_payloads = ohlcv_payloads or {}
+
+    async def fetch(self, data_type: DataType, symbol: str, **kwargs) -> pl.DataFrame:
+        if data_type is not DataType.OHLCV:
+            raise NotImplementedError(f"Yahoo does not support {data_type.value}.")
+        return await self.get_ohlcv(
+            symbol,
+            kwargs.get("start"),
+            kwargs.get("end"),
+            kwargs.get("interval", "1d"),
+        )
 
     async def get_ohlcv(
         self,

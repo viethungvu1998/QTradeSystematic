@@ -10,6 +10,7 @@ from qts.core.portfolio import Position
 from qts.execution.base import BaseBroker
 from qts.execution.router import OrderRouter
 from qts.execution.sync import PositionSync
+from qts.orchestration.tasks.execution_tasks import sync_positions
 
 
 class MockBroker(BaseBroker):
@@ -61,3 +62,18 @@ def test_position_sync_generates_delta_orders():
         account_value=Decimal("1000"),
     )
     assert orders[0].side is OrderSide.BUY
+
+
+@pytest.mark.asyncio
+async def test_sync_positions_creates_instruments_for_new_targets(stock_ohlcv):
+    broker = MockBroker()
+    orders = await sync_positions(
+        config=None,
+        syncer=PositionSync(),
+        brokers={AssetType.STOCK: broker},
+        target_weights={"AAPL": Decimal("0.1")},
+        data=stock_ohlcv,
+    )
+    assert len(orders) == 1
+    assert orders[0].instrument.symbol == "AAPL"
+    assert orders[0].instrument.currency == "USD"

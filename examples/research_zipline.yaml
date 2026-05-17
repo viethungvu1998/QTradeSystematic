@@ -1,0 +1,31 @@
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL, MSFT, GOOGL, AMZN, META]
+start_date: "2022-01-01"
+end_date: "2024-12-31"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  indicators:
+    - name: rsi
+      params: {periods: [14]}
+    - name: macd
+      params: {}
+  forward_returns:
+    periods: [21]
+strategy:
+  type: factor
+  params:
+    long_quantile: 0.2
+    short_quantile: 0.2
+backtest_engine: "zipline"
+calendar: nyse
+rebalance_frequency: monthly
+fill_model: next_open
+commission:
+  model: percentage
+  rate: 0.001
+slippage_model: fixed

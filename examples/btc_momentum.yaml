@@ -1,0 +1,38 @@
+workflow: research
+asset_types: [crypto]
+
+universe:
+  crypto: ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+
+start_date: "2022-01-01"
+end_date: "2024-01-01"
+initial_capital: 100000
+
+data_sources:
+  crypto: binance
+
+storage: duckdb
+
+features:
+  indicators:
+    - name: rsi
+      params: {periods: [14]}
+    - name: roc
+      params: {periods: [1, 7, 30]}
+
+strategy:
+  type: factor
+  params: {}
+
+backtest_engine: vectorbt   # VectorBTProEngine — reads DuckDB/Polars directly
+
+rebalance_frequency: weekly
+train_window: 90        # ~3 months lookback, appropriate for crypto regime
+
+slippage_model: fixed   # FixedSlippage rate=0.0005
+
+commission:
+  model: percentage
+  rate: 0.001           # Binance taker fee 0.1 %
+
+# No calendar — crypto trades 24/7; VectorBTProEngine uses freq="1D" (daily bars)

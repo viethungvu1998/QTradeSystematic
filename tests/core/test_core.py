@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import polars as pl
 import pytest
 
 from qts.core.events import EventBus, Tick
@@ -10,14 +11,26 @@ from qts.core.instrument import AssetType, Instrument
 from qts.core.order import Fill, Order, OrderSide, OrderType
 from qts.core.portfolio import Portfolio, Position
 from qts.core.registry import Registry
+from qts.research.strategies.base import BaseStrategy
 
 
 def test_instrument_model():
     stock = Instrument("AAPL", AssetType.STOCK, "NASDAQ", "USD")
+    vn_stock = Instrument("VN:VNM", AssetType.VN_STOCK, "HOSE", "VND")
+    commodity = Instrument("CMX:CL", AssetType.COMMODITY, "NYMEX", "USD")
     crypto = Instrument("BTC/USDT", AssetType.CRYPTO, "BINANCE", "USDT")
     assert stock.asset_type is AssetType.STOCK
+    assert vn_stock.asset_type is AssetType.VN_STOCK
+    assert commodity.asset_type is AssetType.COMMODITY
     assert crypto.asset_type is AssetType.CRYPTO
-    assert len(list(AssetType)) == 2
+    assert AssetType.from_symbol("PERP:ETH/USDT") is AssetType.CRYPTO_FUTURES
+    assert AssetType.from_symbol("VNF:VN30F2503") is AssetType.VN_FUTURES
+    assert AssetType.from_symbol("VNW:CVNM2403") is AssetType.VN_WARRANT
+    assert AssetType.from_symbol("BTC/USDT") is AssetType.CRYPTO
+    assert AssetType.from_symbol("VN:VNM") is AssetType.VN_STOCK
+    assert AssetType.from_symbol("CMX:CL") is AssetType.COMMODITY
+    assert AssetType.from_symbol("AAPL") is AssetType.STOCK
+    assert len(list(AssetType)) == 7
 
 
 def test_order_and_fill_models():
@@ -47,6 +60,36 @@ def test_registry_resolution_and_missing_key():
     assert Registry.get_feature("stub_feature") is StubFeature
     with pytest.raises(Exception, match="missing_feature"):
         Registry.get_feature("missing_feature")
+
+
+class DummyStrategy(BaseStrategy):
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
+        return self.empty_signal_frame()
+
+
+def test_base_strategy_empty_signal_frame_schema():
+    frame = DummyStrategy.empty_signal_frame()
+    assert frame.columns == ["date", "symbol", "signal", "weight"]
+    assert frame.schema == {
+        "date": pl.Date,
+        "symbol": pl.String,
+        "signal": pl.Int32,
+        "weight": pl.Float64,
+    }
+
+
+def test_base_strategy_validate_rejects_invalid_values():
+    strategy = DummyStrategy()
+    invalid_signal = pl.DataFrame(
+        [{"date": datetime(2024, 1, 1).date(), "symbol": "AAPL", "signal": 2, "weight": 0.5}],
+        schema={"date": pl.Date, "symbol": pl.String, "signal": pl.Int32, "weight": pl.Float64},
+    )
+    with pytest.raises(ValueError, match="signal"):
+        strategy.validate_signal_frame(invalid_signal)
+
+    invalid_weight = pl.DataFrame([{"date": datetime(2024, 1, 1).date(), "symbol": "AAPL", "signal": 1, "weight": 1.5}])
+    with pytest.raises(ValueError, match="weight"):
+        strategy.validate_signal_frame(invalid_weight)
 
 
 @pytest.mark.asyncio

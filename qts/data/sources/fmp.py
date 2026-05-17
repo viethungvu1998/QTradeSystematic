@@ -8,7 +8,7 @@ import polars as pl
 
 from qts.core.errors import DataSourceError
 from qts.core.registry import Registry
-from qts.data._schemas import OHLCV_COLUMNS
+from qts.data._schemas import DataType, OHLCV_COLUMNS
 from qts.data.base import BaseDataSource
 
 
@@ -34,6 +34,8 @@ def _normalize_ohlcv(symbol: str, payload: pl.DataFrame) -> pl.DataFrame:
 class FMPDataSource(BaseDataSource):
     """Fixture-friendly FMP adapter."""
 
+    CAPABILITIES = frozenset({DataType.OHLCV, DataType.FUNDAMENTALS})
+
     def __init__(
         self,
         ohlcv_payloads: dict[str, pl.DataFrame] | None = None,
@@ -41,6 +43,18 @@ class FMPDataSource(BaseDataSource):
     ) -> None:
         self.ohlcv_payloads = ohlcv_payloads or {}
         self.fundamentals_payloads = fundamentals_payloads or {}
+
+    async def fetch(self, data_type: DataType, symbol: str, **kwargs) -> pl.DataFrame:
+        if data_type is DataType.OHLCV:
+            return await self.get_ohlcv(
+                symbol,
+                kwargs.get("start"),
+                kwargs.get("end"),
+                kwargs.get("interval", "1d"),
+            )
+        if data_type is DataType.FUNDAMENTALS:
+            return await self.get_fundamentals(symbol)
+        raise NotImplementedError(f"FMP does not support {data_type.value}.")
 
     async def get_ohlcv(
         self,

@@ -1,237 +1,304 @@
 # ARCHITECTURE
 
-## Repo Structure
+## Repo Layout
 
-```
+```text
 QTradeSystematic/
 ├── qts/
-│   ├── core/           # Shared ABCs, models, plugin registry
-│   ├── data/           # Data acquisition, storage, bundle ingestion
-│   ├── research/       # Feature engineering + backtesting
-│   ├── execution/      # Live order execution
-│   ├── orchestration/  # Single Prefect flow + task library
-│   └── config/         # YAML parsing + registry resolution
+│   ├── config/
+│   ├── core/
+│   ├── data/
+│   ├── execution/
+│   ├── orchestration/
+│   ├── research/
+│   └── utils/
 ├── examples/
 ├── tests/
 └── pyproject.toml
 ```
 
----
+## Layer Summary
 
-## Layers
+### `qts/core`
 
-### `core/` — Foundation
+Shared models and extension points.
 
-No imports from any other layer. Everything else imports from here.
+- `instrument.py`: `AssetType`, `Instrument`
+- `order.py`: `Order`, `Fill`, enums
+- `portfolio.py`: `Position`, `Portfolio`
+- `events.py`: async tick/order event models
+- `registry.py`: central plugin registry
 
-| File | Responsibility |
-|---|---|
-| `instrument.py` | `Instrument(symbol, asset_type, exchange, currency)` — unified Stock + Crypto model |
-| `order.py` | `Order`, `Fill`, `OrderSide`, `OrderType` |
-| `portfolio.py` | `Position`, `Portfolio` |
-| `events.py` | Async event bus — real-time ticks and order updates |
-| `registry.py` | Plugin registry — maps string names to concrete classes |
+Asset type routing is derived from symbol strings via `AssetType.from_symbol()`:
 
----
+- `PERP:*` → `CRYPTO_FUTURES`
+- `VNF:*` → `VN_FUTURES`
+- `VNW:*` → `VN_WARRANT`
+- `*/*` → `CRYPTO`
+- `VN:*` → `VN_STOCK`
+- `CMX:*` → `COMMODITY`
+- otherwise → `STOCK`
 
-### `data/` — Acquisition + Storage
+### `qts/data`
 
-```
-data/
+Acquisition, routing, persistence, and bundle support.
+
+```text
+qts/data/
+├── _schemas.py
 ├── base.py
-├── sources/
-│   ├── fmp.py          # Stocks — Financial Modeling Prep
-│   ├── yahoo.py        # Stocks — Yahoo Finance
-│   └── binance.py      # Crypto — Binance REST + WebSocket
-├── storage/
-│   ├── base.py         # BaseStorage ABC
-│   ├── duckdb.py       # Primary DB
-│   └── parquet.py      # Local cache layer
+├── manager.py
 ├── bundles/
-│   ├── base.py         # BaseBundleAdapter ABC
-│   ├── local.py        # LocalBundleAdapter — filesystem Zipline bundle
-│   └── zipline_ingest.py  # Ingest DuckDB tables → Zipline bundle
-└── manager.py
+├── sources/
+└── storage/
 ```
 
-`DataManager` routes by symbol convention (`BTC/USDT` → Binance, `AAPL` → FMP), normalises all output to `[date, symbol, open, high, low, close, volume]`, writes to DuckDB, and ingests stock data into a Zipline bundle for the `ZiplineEngine`.
+Key components:
 
----
+- `DataType`: `ohlcv`, `fundamentals`, `options_chain`, `funding_rates`, `open_interest`, `futures_ohlcv`
+- `DataManager`: DB-first, then parquet cache, then source fetch
+- `DuckDBStorage`: main persistent store
+- `ParquetStorage`: cache store
+- `LocalBundleAdapter`: local bundle persistence
+- `ZiplineBundleAdapter`: zipline-reloaded ingestion path
 
-### `research/` — Features + Backtesting
+Default storage paths come from `qts/utils/paths.py`:
 
+```text
+~/.qts/
+├── database/qts.duckdb          ← stock_prices, crypto_prices, futures_prices,
+│                                   vn_stock_prices, vn_futures_prices, vn_warrant_prices
+├── cache/
+│   └── vn_fundamentals/         ← {ticker}_{annual|quarterly}.parquet, TTL 24 h
+└── bundles/                     ← Zipline bundles
 ```
-research/
+
+Current source registrations:
+
+| Key | Module | Capabilities | Live client |
+|---|---|---|---|
+| `fmp` | `qts/data/sources/fmp.py` | `ohlcv`, `fundamentals` | fixture-only |
+| `yahoo` | `qts/data/sources/yahoo.py` | `ohlcv` | fixture-only |
+| `dnse` | `qts/data/sources/dnse.py` | `ohlcv`, `futures_ohlcv` | `from_env()` — geo-restricted to VN IP |
+| `vnstock` | `qts/data/sources/vnstock.py` | `ohlcv`, `fundamentals` | `from_env()` — KBS public API, no auth |
+| `vnstock_futures` | `qts/data/sources/vnstock.py` | `futures_ohlcv` | `from_env()` — KBS public API, no auth |
+| `binance` | `qts/data/sources/binance.py` | `ohlcv` | `from_env()` |
+| `binance_futures` | `qts/data/sources/binance.py` | `futures_ohlcv` | `from_env()` |
+
+KBS (`vnstock` / `vnstock_futures`) details:
+
+- Base URL: `https://kbbuddywts.kbsec.com.vn/iis-server/investment`
+- No authentication required; browser User-Agent is sufficient.
+- Equity/warrant prices are returned in thousands of VND (divide by 1000 → VND/1000 unit).
+- Index and futures prices are returned in full points (no scaling).
+- VN30 futures symbols: old format `VNF:VN30F2606` is auto-converted to KRX format `41I1G6000` for contracts expiring May 2025 or later.
+- DNSE (`openapi.dnse.com.vn`) requires HMAC-SHA256 auth and is geo-restricted to Vietnamese IPs; use `vnstock` as the primary source from outside Vietnam.
+
+Fundamentals pipeline (`vnstock` source):
+
+- Fetches 4 report types: `KQKD` (income), `CDKT` (balance sheet), `LCTT` (cash flow), `CSTC` (ratios).
+- Stored in tidy long format: `symbol | report_type | period | fiscal_year | quarter | report_date | item_en | value`.
+- Values from `KQKD`/`CDKT`/`LCTT` are in thousands of VND. `CSTC` values are native ratio units (%, ×, VND/share).
+- On-disk cache at `~/.qts/cache/vn_fundamentals/{ticker}_{annual|quarterly}.parquet`, TTL 24 h.
+- Pass `force_refresh=True` to `get_fundamentals()` to bypass the cache.
+
+Important implementation detail:
+
+- `Config.build()` instantiates data sources with their default constructors.
+- That means the registry wiring exists, but real API client construction is still a separate integration step.
+
+### `qts/research`
+
+Feature engineering, strategy logic, backtesting, and analysis helpers.
+
+```text
+qts/research/
+├── backtest/
 ├── features/
-│   ├── base.py              # BaseFeature ABC: fit_transform(df) → df
-│   ├── technical.py         # RSI, MACD, ATR, Bollinger — any OHLCV
-│   ├── fundamentals.py      # P/E, EV/EBITDA — stocks only, no-op for crypto
-│   ├── onchain.py           # NVT, active addresses — crypto only
-│   └── forward_returns.py
-├── strategies/
-│   ├── base.py              # BaseStrategy ABC: generate_signals(df) → SignalFrame
-│   ├── factor/              # ML factor model (XGBoost)
-│   └── stat_arb/            # Pairs / cointegration
-└── backtest/
-    ├── base.py              # BaseEngine ABC · BacktestConfig · BacktestResult
-    ├── engines/
-    │   ├── vectorbtpro_engine.py   # "fast"   — vectorised, full-history batch
-    │   └── zipline_engine.py       # "normal" — bar-by-bar, strict look-ahead guard
-    ├── simulation/
-    │   ├── fills.py         # ImmediateFill | NextOpenFill | VWAPFill
-    │   ├── slippage.py      # FixedSlippage | VolatilityScaledSlippage
-    │   ├── commission.py    # PercentageCommission | PerTradeCommission
-    │   └── calendar.py      # NYSE | HKEX | Crypto (24/7)
-    └── metrics.py           # Sharpe, Sortino, CAGR, max drawdown, win rate
+├── portfolio_analysis/
+├── statistical_analysis/
+└── strategies/
 ```
 
-`ZiplineEngine` reads from the bundle (stocks only). `VectorBTProEngine` reads from DuckDB/Polars directly for all asset types.
+#### Features
 
----
+- `FeaturePipeline.fit_transform()` always starts with `preprocess_ohlcv()`
+- Legacy `technical` feature still exists
+- Fine-grained indicator plugins live under `features/indicators/`
 
-### `execution/` — Live Trading
+Registered feature keys:
 
-```
-execution/
-├── base.py             # BaseBroker ABC
-├── brokers/
-│   ├── moomoo.py       # Stocks — Futu OpenD gateway (futu-api)
-│   └── binance.py      # Crypto — Binance REST + user data stream (binance-connector)
-├── router.py           # OrderRouter: dict[AssetType, BaseBroker] — dispatches concurrently
-└── sync.py             # PositionSync: target weights → delta orders
-```
+- `technical`
+- `fundamental`
+- `onchain`
+- `rsi`
+- `roc`
+- `macd`
+- `adx`
+- `atr`
+- `bollinger`
+- `hist_vol`
+- `obv`
+- `volume_ratio`
+- `zscore`
 
-**Install execution extras before using live brokers:**
-```
-.venv/bin/pip install -e ".[execution]"
-```
+#### Strategies
 
-**Binance mode:** resolved from `brokers.binance_mode` in YAML. Adapters read credentials from env at `connect()` time — never stored in config files.
+Registered strategy keys:
 
-| YAML `binance_mode` | Env vars read | Base URL |
+- `factor`
+- `ml_factor`
+- `stat_arb`
+
+Supporting modules also exist for:
+
+- factor training algorithms
+- portfolio construction helpers
+- pair selection and spread signal generation
+
+Refactor direction for strategy families:
+
+- Keep `BaseStrategy.generate_signals(data) -> SignalFrame` as the stable public strategy seam.
+- Family-level `base.py` and `core.py` modules are justified only when a family has real shared behavior.
+- `factor/` and `stat_arb/` are the two earned families for this structure today.
+- Do not add `cross_sectional/base.py` or `cross_sectional/core.py` until the first concrete cross-sectional strategy exists.
+- Stat-arb should conform to the same seam as every other strategy: consume a universe frame and emit a standard signal frame across traded symbols.
+
+#### Backtesting
+
+Backtest runtime lives in `qts/research/backtest/`.
+
+- `BacktestConfig` and `BacktestResult` are the shared contracts
+- `walk_forward_signals()` implements train-window signal generation
+- `run_backtest_frame()` converts signal frames into portfolio returns
+- Engines are the only supported simulation entrypoints
+
+Registered engine keys:
+
+| Key | Class | Notes |
 |---|---|---|
-| `demo` | `BINANCE_DEMO_TRADING_API_KEY`, `BINANCE_DEMO_TRADING_SECRET_KEY` | `https://testnet.binance.vision` |
-| `live` | `BINANCE_TRADING_KEY`, `BINANCE_TRADING_SECRET_KEY` | Binance production |
+| `vectorbt` | `VectorBTProEngine` | Vectorized target-percent simulation |
+| `fast` | `VectorBTProEngine` | Alias for `vectorbt` |
+| `zipline` | `ZiplineReloadedEngine` | Calendar-aware zipline-reloaded simulation |
+| `normal` | `ZiplineEngine` | Compatibility engine class; YAML config loader currently normalizes `normal` -> `zipline` |
 
----
+Simulation model registrations:
 
-### `orchestration/` — Workflows
+- Fill models: `immediate`, `next_open`, `vwap`
+- Slippage models: `fixed`, `volatility_scaled`
+- Commission models: `percentage`, `per_trade`
+- Calendars: `nyse`, `hkex`, `crypto`
 
+### `qts/execution`
+
+Live-order abstractions and adapters.
+
+```text
+qts/execution/
+├── base.py
+├── router.py
+├── sync.py
+└── brokers/
 ```
-orchestration/
-├── flow.py             # Single qts_flow — zero hardcoded parameters
+
+Current broker registrations:
+
+| Key | Class | Current status |
+|---|---|---|
+| `moomoo` | `MoomooBroker` | Fixture-friendly unless a client is injected |
+| `binance` | `BinanceBroker` | Can build a real spot client via `from_env()` |
+
+Notes:
+
+- `qts/execution/brokers/dnse.py` exists but currently has no implementation or registry entry.
+- `PositionSync` and `OrderRouter` are operational and used by `qts_flow` in `live` mode.
+
+### `qts/orchestration`
+
+Async orchestration and Prefect compatibility.
+
+```text
+qts/orchestration/
+├── flow.py
+├── prefect_compat.py
+├── serve.py
+├── flows/
 └── tasks/
-    ├── data_tasks.py       # download_ohlcv, download_fundamentals
-    ├── research_tasks.py   # build_features, run_backtest
-    └── execution_tasks.py  # sync_positions, execute_rebalance
 ```
 
-One flow, one entry point. All behaviour — asset types, engine, brokers, schedule, commission — is resolved from `BacktestConfig` at runtime. Nothing is hardcoded in `flow.py`.
+Current flow surface:
 
----
+- `qts_flow(config_path: str)`: main async entry point
+- `data_fetch_flow(config_path: str, asset_types: list[str], data_types: list[str])`: data-only async flow
 
-### `config/` — Resolution
+Current flow behavior:
 
-`Config.build()` parses YAML and resolves all string names through the registry. Full config schema:
+- `qts_flow()` downloads spot OHLCV plus `crypto_futures` data when configured, combines them into one panel, then runs research or live execution logic.
+- `data_fetch_flow()` accepts `crypto_futures` in `asset_types` and routes `futures_ohlcv` requests through the same `DataManager` path as other asset classes.
 
-```yaml
-# ── Workflow ───────────────────────────────────────────────
-workflow: research            # research | validation | live
+`prefect_compat.py` provides a fallback `flow`, `task`, and `serve` shim when Prefect is not installed.
 
-# ── Universe ───────────────────────────────────────────────
-asset_types: [stock, crypto]  # any combination
-universe:
-  stock:  [AAPL, GOOGL, MSFT]
-  crypto: [BTC/USDT, ETH/USDT]
-start_date: "2018-01-01"
-end_date:   "2024-12-31"
-initial_capital: 100000
+Current deployment registration in `serve.py` creates five data-refresh deployments:
 
-# ── Data ───────────────────────────────────────────────────
-data_sources:
-  stock:  fmp               # fmp | yahoo
-  crypto: binance
-storage: duckdb
+- `stock-ohlcv-daily`
+- `vn-stock-ohlcv-daily`
+- `crypto-ohlcv-daily`
+- `crypto-funding-8h`
+- `stock-fundamentals-weekly`
 
-# ── Features ───────────────────────────────────────────────
-features:
-  technical:   true
-  fundamental: true         # stocks only — auto no-op for crypto
-  onchain:     false        # crypto only — auto no-op for stocks
-  forward_returns:
-    periods: [1, 5, 20]
+### `qts/config`
 
-# ── Strategy ───────────────────────────────────────────────
-strategy:
-  type: factor              # factor | stat_arb
-  params:
-    n_factors: 5
-    lookback:  60
+Configuration parsing and runtime resolution.
 
-# ── Backtest ───────────────────────────────────────────────
-backtest_engine: fast       # fast (vectorbtpro) | normal (zipline)
-fill_model:      next_open  # immediate | next_open | vwap
-slippage_model:  volatility_scaled  # fixed | volatility_scaled
-commission:
-  model: percentage         # percentage | per_trade
-  rate:  0.001
-calendar: nyse              # nyse | hkex | crypto
+- `load_config()` validates YAML and returns `BacktestConfig`
+- `Config.build()` resolves registry keys into concrete runtime objects
 
-# ── Brokers (live only) ────────────────────────────────────
-brokers:
-  stock:  moomoo
-  crypto: binance
-  binance_mode: demo       # demo (testnet) | live (production)
+Current behavior to keep in mind:
 
-# ── Schedule (live only) ───────────────────────────────────
-schedule:
-  stock:  "0 16 * * 1-5"   # daily after NYSE close
-  crypto: "0 */4 * * *"    # every 4 hours
+- `promotion_gate` is parsed into config for `validation`, but not enforced by the flow
+- `brokers.binance_mode` is stored in config, but broker construction does not yet switch on it automatically
 
-# ── Promotion gate (validation only) ──────────────────────
-promotion_gate:
-  max_sharpe_degradation: 0.30
+Refactor direction:
+
+- Package bootstrap should import strategy families, not a hand-picked set of concrete strategy modules.
+- Registry-backed strategies should all resolve after package import, including `ml_factor`.
+- Built-in features and storage should resolve through the same registries as the rest of the plugin surface.
+- YAML compatibility stays intact during this cleanup: `strategy.type`, `strategy.params`, `backtest_engine`, and the existing feature booleans remain valid.
+
+## End-to-End Data Path
+
+### Research and validation
+
+```text
+config_path
+  -> Config.build()
+  -> DataManager
+  -> download_ohlcv()
+  -> optional download_futures_ohlcv()
+  -> optional download_fundamentals()
+  -> FeaturePipeline.fit_transform()
+  -> engine.run()
+  -> BacktestResult
 ```
 
----
+### Live
 
-## Plugin Registry
-
-```python
-# Register
-@Registry.register_broker("moomoo")
-class MoomooBroker(BaseBroker): ...
-
-# Resolve
-broker = Registry.get_broker("moomoo")()
+```text
+config_path
+  -> Config.build()
+  -> DataManager
+  -> download_ohlcv() + optional download_futures_ohlcv()
+  -> build_features()
+  -> run_backtest()
+  -> latest target weights
+  -> PositionSync.compute_deltas()
+  -> OrderRouter.execute()
 ```
 
-| Extension point | ABC | Decorator |
-|---|---|---|
-| Data source | `BaseDataSource` | `@Registry.register_data_source` |
-| Storage | `BaseStorage` | `@Registry.register_storage` |
-| Feature | `BaseFeature` | `@Registry.register_feature` |
-| Strategy | `BaseStrategy` | `@Registry.register_strategy` |
-| Backtest engine | `BaseEngine` | `@Registry.register_engine` |
-| Broker | `BaseBroker` | `@Registry.register_broker` |
+## Current Gaps
 
----
+These are the main architecture gaps between the implemented modules and the top-level flows:
 
-## Data Flow
-
-```
-FMP / Yahoo ──┐                          ┌──► Zipline bundle ──► ZiplineEngine ("normal")
-              ├──► DataManager ──► DuckDB─┤
-Binance ───────┘                          └──► FeaturePipeline ──► Strategy.generate_signals()
-                                                                           │
-                                                              VectorBTProEngine ("fast")
-                                                                           │
-                                                                    BacktestResult
-                                                                           │
-                                                               OrderRouter.execute()
-                                                                │               │
-                                                          MoomooBroker    BinanceBroker
-```
-
-- Stocks: DuckDB + Zipline bundle. `ZiplineEngine` reads from the bundle; `VectorBTProEngine` reads from DuckDB.
-- Crypto: DuckDB only. `ZiplineEngine` is not used for crypto.
+- validation metadata is parsed, but there is no automatic research-vs-validation gate
+- several adapters are framework stubs awaiting real client wiring
+- there is no packaged CLI layer yet

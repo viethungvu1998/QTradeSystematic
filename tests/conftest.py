@@ -38,6 +38,26 @@ def crypto_ohlcv() -> pl.DataFrame:
 
 
 @pytest.fixture
+def crypto_futures_ohlcv() -> pl.DataFrame:
+    return _ohlcv_frame("PERP:BTC/USDT", date(2024, 1, 1), 80, 43_000)
+
+
+@pytest.fixture
+def vn_stock_ohlcv() -> pl.DataFrame:
+    return _ohlcv_frame("VN:VNM", date(2024, 1, 1), 80, 75)
+
+
+@pytest.fixture
+def vn_futures_ohlcv() -> pl.DataFrame:
+    return _ohlcv_frame("VNF:VN30F2503", date(2024, 1, 1), 80, 1_250)
+
+
+@pytest.fixture
+def vn_warrant_ohlcv() -> pl.DataFrame:
+    return _ohlcv_frame("VNW:CVNM2403", date(2024, 1, 1), 80, 5)
+
+
+@pytest.fixture
 def paired_ohlcv() -> pl.DataFrame:
     left = _ohlcv_frame("AAA", date(2024, 1, 1), 80, 100)
     right = _ohlcv_frame("BBB", date(2024, 1, 1), 80, 99).with_columns(
@@ -94,7 +114,7 @@ features:
 strategy:
   type: factor
   params: {}
-backtest_engine: fast
+backtest_engine: vectorbt
 """
     validation = """
 workflow: validation
@@ -116,7 +136,7 @@ features:
 strategy:
   type: factor
   params: {}
-backtest_engine: normal
+backtest_engine: zipline
 fill_model: next_open
 slippage_model: volatility_scaled
 commission:
@@ -145,7 +165,7 @@ features:
 strategy:
   type: factor
   params: {}
-backtest_engine: fast
+backtest_engine: vectorbt
 fill_model: next_open
 slippage_model: volatility_scaled
 commission:

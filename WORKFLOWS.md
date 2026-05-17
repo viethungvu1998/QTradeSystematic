@@ -2,222 +2,237 @@
 
 ## Overview
 
-Three workflows — one Prefect flow, one CLI entry point. Only the YAML config changes.
+This repository currently exposes two callable async flows and one deployment-registration script.
 
-```
-Research  →  Validation  →  Live
-  (fast)      (normal)     (execute)
+- `qts_flow(config_path)`
+- `data_fetch_flow(config_path, asset_types, data_types)`
+- `python qts/orchestration/serve.py`
 
-qts run --config research.yaml
-qts run --config validation.yaml
-qts run --config live.yaml
-```
+There is no `qts run` CLI today.
+There is also no supported strategy-specific workflow surface; engines remain the only simulation entrypoints.
 
----
+## 1. Research
 
-## 1. Research — Signal Discovery
+Use `workflow: research` in YAML.
 
-**Goal:** Fast iteration over features, parameters, universe.
-**Engine:** `VectorBTProEngine` — full history vectorised.
+Runtime path:
 
-```
-1. DataManager.get_ohlcv(config.universe, config.start_date, config.end_date)
-      Routes by config.data_sources → writes to config.storage (duckdb)
+1. `qts_flow()` calls `Config.build(config_path)`
+2. `DataManager` is created from the resolved config
+3. `download_ohlcv()` fetches `stock`, `vn_stock`, and spot `crypto`
+4. `download_futures_ohlcv()` fetches `crypto_futures` when present in config
+5. `download_fundamentals()` runs only when `features.fundamental` is enabled
+6. `FeaturePipeline.fit_transform()` preprocesses OHLCV, then applies configured features
+7. `run_backtest()` executes the configured engine
+8. The flow returns a `BacktestResult`
 
-2. FeaturePipeline.fit_transform(df)
-      Built from config.features:
-        technical    → all asset types
-        fundamental  → stocks only (no-op for crypto)
-        onchain      → crypto only (no-op for stocks)
-        ForwardReturns(periods=config.features.forward_returns.periods)
+Important notes:
 
-3. Strategy.generate_signals(df)
-      Resolved from config.strategy.type via registry
-      Returns SignalFrame[date, symbol, signal, weight]
+- `qts_flow` is `async`
+- the argument is a config path string
+- walk-forward signal generation is handled inside the engine path when pipeline and raw OHLCV are supplied
+- strategy-specific runners are not part of the supported workflow surface
 
-4. VectorBTProEngine.run(strategy, data, config)
-      Vectorises full signal history → batch simulation
+Example:
 
-5. BacktestResult → metrics.py
-      Sharpe, Sortino, CAGR, max drawdown, win rate
+```python
+import asyncio
 
-6. (optional) Grid search / Optuna sweep over steps 3–5
-```
+from qts.orchestration.flow import qts_flow
 
-**Output:** Best strategy config — parameters, features, universe.
-
----
-
-## 2. Validation — Pre-Live Check
-
-**Goal:** Confirm research results hold under realistic simulation.
-**Engine:** `ZiplineEngine` — strict bar-by-bar, look-ahead prevented.
-
-```
-1. Load Zipline bundle (built from same DuckDB data — no re-download)
-
-2. FeaturePipeline.fit_transform(df)
-      Identical pipeline to research
-
-3. Strategy.generate_signals(visible_data_only)
-      Engine exposes only data up to current bar — no future leakage
-
-4. ZiplineEngine.run(strategy, data, config)
-      config.fill_model      → resolved from registry
-      config.slippage_model  → resolved from registry
-      config.commission      → model + rate applied per fill
-      config.calendar        → nyse | hkex | crypto
-
-5. BacktestResult vs research result
-      Sharpe degradation > config.promotion_gate.max_sharpe_degradation → reject
-      Metrics hold → promote to live
+result = asyncio.run(qts_flow("examples/research_zipline.yaml"))
+print(result.metrics)
 ```
 
-**Output:** Validated strategy config — safe to go live.
+## 2. Validation
 
----
+Use `workflow: validation` in YAML.
 
-## 3. Live — Scheduled Execution
+Current behavior:
 
-**Goal:** Periodic rebalance against live brokers.
-**Orchestration:** `qts_flow` scheduled per `config.schedule`.
+- the loader requires additional keys such as `fill_model`, `slippage_model`, `commission`, `calendar`, and `promotion_gate`
+- `qts_flow` still follows the same control path as research
+- the selected backtest engine is whatever `backtest_engine` resolves to, typically `zipline`
 
+What validation does not currently do:
+
+- it does not rerun a separate research backtest automatically
+- it does not compare research and validation Sharpe
+- it does not enforce `promotion_gate.max_sharpe_degradation`
+
+So `validation` is best understood as a stricter config profile plus a different engine choice, not an automated promotion step.
+
+## 3. Live
+
+Use `workflow: live` in YAML.
+
+Runtime path:
+
+1. `qts_flow()` resolves config and dependencies
+2. OHLCV is downloaded for `stock`, `vn_stock`, spot `crypto`, and `crypto_futures`
+3. features are built from the combined panel
+4. the configured backtest engine generates a `BacktestResult`
+5. the latest signal row per symbol is converted into target weights
+6. `PositionSync` computes delta orders from broker positions and account value
+7. `OrderRouter` dispatches orders concurrently
+8. the flow returns a dict with:
+   - `result`
+   - `orders`
+   - `fills`
+   - `schedule`
+
+Current live-mode caveats:
+
+- `MoomooBroker` is fixture-friendly unless a client is injected
+- `BinanceBroker` supports real credentials through `from_env()`, but `Config.build()` does not call `from_env()` automatically
+- `brokers.binance_mode` is parsed into config but not applied during object construction
+
+## 4. Data Refresh
+
+`data_fetch_flow()` is the data-only flow.
+
+Signature:
+
+```python
+async def data_fetch_flow(config_path: str, asset_types: list[str], data_types: list[str]) -> None
 ```
-1. [Prefect · parallel] Data download for each asset type in config.asset_types
-      download_ohlcv(config.universe, lookback)          → config.storage
-      download_fundamentals(config.universe, lookback)   → config.storage
-        (only if config.features.fundamental = true)
 
-2. [Prefect] build_features(df, config.features)
-      Same FeaturePipeline — built from config
+Current behavior:
 
-3. [Prefect] run_backtest(strategy, data, config)
-      config.backtest_engine = "fast" — produces final-bar target weights
+- resolves config with `Config.build()`
+- builds a `DataManager`
+- reads symbols from `stock`, `vn_stock`, `crypto`, and `crypto_futures` universes
+- calls `manager.get(DataType(...), symbols, start=..., end=...)`
 
-4. [Prefect] sync_positions(config.brokers)
-      broker.get_positions() per configured broker → current holdings
-      PositionSync.compute_deltas(target_weights, current) → order list
+Example:
 
-5. [Prefect] execute_rebalance(orders, config.brokers)
-      OrderRouter.execute(orders)
-        routes each order to broker resolved from config.brokers by AssetType
-          stock  → MoomooBroker
-          crypto → BinanceBroker
+```python
+import asyncio
 
-6. Log fills → config.storage positions table
+from qts.orchestration.flows.data_fetch_flow import data_fetch_flow
+
+asyncio.run(data_fetch_flow("examples/research_zipline.yaml", ["stock"], ["ohlcv"]))
 ```
 
-**Schedule:** `config.schedule` per asset type — no cron literals in `flow.py`.
+## 5. Deployment Registration
 
----
+`qts/orchestration/serve.py` registers five data-refresh deployments through the Prefect compatibility layer.
 
-## Config Examples
+Current deployments:
+
+| Deployment | Asset types | Data types | Cron |
+|---|---|---|---|
+| `stock-ohlcv-daily` | `["stock"]` | `["ohlcv"]` | `0 21 * * 1-5` |
+| `vn-stock-ohlcv-daily` | `["vn_stock"]` | `["ohlcv"]` | `0 9 * * 1-5` |
+| `crypto-ohlcv-daily` | `["crypto"]` | `["ohlcv"]` | `0 0 * * *` |
+| `crypto-funding-8h` | `["crypto"]` | `["funding_rates"]` | `0 */8 * * *` |
+| `stock-fundamentals-weekly` | `["stock"]` | `["fundamentals"]` | `0 8 * * 1` |
+
+VN fundamentals are not yet a registered deployment. To crawl manually:
+
+```python
+import asyncio
+from qts.data.sources.vnstock import VnstockDataSource
+
+src = VnstockDataSource.from_env()
+# Annual (12 years), force fresh cache
+df = asyncio.run(src.get_fundamentals("VN:VNM", termtype=1, pages=3, force_refresh=True))
+# Quarterly (8 quarters)
+df_q = asyncio.run(src.get_fundamentals("VN:VNM", termtype=2, pages=2))
+```
+
+Run it with:
+
+```bash
+python qts/orchestration/serve.py
+```
+
+If Prefect is not installed, the compatibility shim keeps the decorators and deployment objects importable for local development and tests.
+
+## Config Shape Used by Flows
+
+Common fields:
 
 ```yaml
-# research.yaml
-workflow: research
-asset_types: [stock, crypto]
+workflow: research | validation | live
+asset_types: [stock, vn_stock, vn_futures, vn_warrant, crypto, crypto_futures]
+start_date: "YYYY-MM-DD"   # required for research and validation
+end_date: "YYYY-MM-DD"     # required for research and validation
+initial_capital: 100000    # required for research and validation
 universe:
-  stock:  [AAPL, GOOGL, MSFT]
-  crypto: [BTC/USDT, ETH/USDT]
-start_date: "2018-01-01"
-end_date:   "2024-12-31"
-initial_capital: 100000
+  stock: []
+  vn_stock: []          # VN: prefix, e.g. VN:VNM
+  vn_futures: []        # VNF: prefix, e.g. VNF:VN30F2606 or VNF:41I1G6000
+  vn_warrant: []        # VNW: prefix, e.g. VNW:CACB2601
+  crypto: []
+  crypto_futures: []
 data_sources:
-  stock:  fmp
+  stock: fmp | yahoo
+  vn_stock: vnstock     # KBS public API — use dnse only from Vietnamese IP
+  vn_futures: vnstock_futures
+  vn_warrant: vnstock
   crypto: binance
+  crypto_futures: binance_futures
 storage: duckdb
 features:
-  technical: true
-  fundamental: true
-  onchain: true
-  forward_returns:
-    periods: [1, 5, 20]
-strategy:
-  type: factor
-  params: { n_factors: 5, lookback: 60 }
-backtest_engine: fast
-```
-
-```yaml
-# validation.yaml
-workflow: validation
-asset_types: [stock]
-universe:
-  stock: [AAPL, GOOGL, MSFT]
-start_date: "2018-01-01"
-end_date:   "2024-12-31"
-initial_capital: 100000
-data_sources:
-  stock: fmp
-storage: duckdb
-features:
-  technical: true
-  fundamental: true
+  indicators: []
+  technical: false
+  fundamental: false
   onchain: false
   forward_returns:
-    periods: [1, 5, 20]
+    periods: []
 strategy:
-  type: factor
-  params: { n_factors: 5, lookback: 60 }
-backtest_engine: normal
-fill_model: next_open
-slippage_model: volatility_scaled
+  type: factor | ml_factor | stat_arb
+  params: {}
+backtest_engine: vectorbt | zipline | fast | normal
+train_window: 252
+rebalance_frequency: monthly
+```
+
+Interpretation rules:
+
+- all strategy-specific options, including stat-arb settings, live under `strategy.params`
+- the existing feature booleans remain valid for YAML compatibility
+- cleanup work should normalize those booleans and storage resolution through registries without changing the public YAML shape in the same pass
+
+Validation-only required keys:
+
+```yaml
+fill_model: immediate | next_open | vwap
+slippage_model: fixed | volatility_scaled
 commission:
-  model: percentage
+  model: percentage | per_trade
   rate: 0.001
-calendar: nyse
+calendar: nyse | hkex | crypto
 promotion_gate:
   max_sharpe_degradation: 0.30
 ```
 
+Live-only required keys:
+
 ```yaml
-# live.yaml
-workflow: live
-asset_types: [stock, crypto]
-universe:
-  stock:  [AAPL, GOOGL, MSFT]
-  crypto: [BTC/USDT, ETH/USDT]
-data_sources:
-  stock:  fmp
-  crypto: binance
-storage: duckdb
-features:
-  technical: true
-  fundamental: true
-  onchain: true
-  forward_returns:
-    periods: [1, 5, 20]
-strategy:
-  type: factor
-  params: { n_factors: 5, lookback: 60 }
-backtest_engine: fast
-fill_model: next_open
-slippage_model: volatility_scaled
+fill_model: immediate | next_open | vwap
+slippage_model: fixed | volatility_scaled
 commission:
-  model: percentage
+  model: percentage | per_trade
   rate: 0.001
 brokers:
-  stock:  moomoo
+  stock: moomoo
+  vn_stock: null
+  vn_futures: null
+  vn_warrant: null
   crypto: binance
-  binance_mode: demo       # demo (testnet) | live (production)
 schedule:
-  stock:  "0 16 * * 1-5"   # daily after NYSE close
-  crypto: "0 */4 * * *"    # every 4 hours
+  stock: "0 16 * * 1-5"
+  crypto: "0 */4 * * *"
 ```
 
----
+## Suggested Mental Model
 
-## Promotion Gates
+Treat the workflows as follows:
 
-```
-research.yaml ──► metrics pass threshold
-      │
-      ▼
-validation.yaml ──► Sharpe degradation < 30%
-      │
-      ▼
-live.yaml ──► scheduled per config.schedule
-```
-
-Config files are version-controlled. Promotion is a code review, not a runtime decision.
+- `research`: normal backtest run
+- `validation`: backtest run with stricter config and usually a different engine
+- `live`: signal generation plus order routing
+- `data_fetch_flow`: storage refresh only
+- strategy-owned backtest helpers are not part of the long-term callable surface

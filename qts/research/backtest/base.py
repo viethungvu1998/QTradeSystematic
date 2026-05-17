@@ -12,16 +12,40 @@ import polars as pl
 from qts.research.strategies.base import BaseStrategy
 
 
+def empty_backtest_result(
+    engine_name: str = "vectorbt",
+    signals: pl.DataFrame | None = None,
+) -> BacktestResult:
+    """Return a zero-metric BacktestResult with empty Polars frames."""
+    empty_returns = pl.DataFrame(schema={"date": pl.Date, "portfolio_return": pl.Float64})
+    empty_equity = pl.DataFrame(schema={"date": pl.Date, "equity": pl.Float64})
+    return BacktestResult(
+        engine_name=engine_name,
+        metrics={"sharpe": 0.0, "sortino": 0.0, "cagr": 0.0, "max_drawdown": 0.0, "win_rate": 0.0},
+        returns=empty_returns,
+        equity_curve=empty_equity,
+        signals=signals if signals is not None else pl.DataFrame(),
+    )
+
+
 @dataclass(slots=True)
 class UniverseConfig:
     stock: list[str] = field(default_factory=list)
+    vn_stock: list[str] = field(default_factory=list)
+    vn_warrant: list[str] = field(default_factory=list)
+    vn_futures: list[str] = field(default_factory=list)
     crypto: list[str] = field(default_factory=list)
+    crypto_futures: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class DataSourcesConfig:
     stock: str | None = None
+    vn_stock: str | None = None
+    vn_warrant: str | None = None
+    vn_futures: str | None = None
     crypto: str | None = None
+    crypto_futures: str | None = None
 
 
 @dataclass(slots=True)
@@ -30,7 +54,14 @@ class ForwardReturnsConfig:
 
 
 @dataclass(slots=True)
+class IndicatorConfig:
+    name: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class FeaturesConfig:
+    indicators: list[IndicatorConfig] = field(default_factory=list)
     technical: bool = False
     fundamental: bool = False
     onchain: bool = False
@@ -52,14 +83,22 @@ class CommissionConfig:
 @dataclass(slots=True)
 class BrokersConfig:
     stock: str | None = None
+    vn_stock: str | None = None
+    vn_warrant: str | None = None
+    vn_futures: str | None = None
     crypto: str | None = None
+    crypto_futures: str | None = None
     binance_mode: str = "demo"  # demo (testnet) | live (production)
 
 
 @dataclass(slots=True)
 class ScheduleConfig:
     stock: str | None = None
+    vn_stock: str | None = None
+    vn_warrant: str | None = None
+    vn_futures: str | None = None
     crypto: str | None = None
+    crypto_futures: str | None = None
 
 
 @dataclass(slots=True)
@@ -79,7 +118,9 @@ class BacktestConfig:
     storage: str = "duckdb"
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     strategy: StrategyConfig = field(default_factory=lambda: StrategyConfig(type="factor"))
-    backtest_engine: str = "fast"
+    backtest_engine: str = "vectorbt"
+    train_window: int = 252
+    rebalance_frequency: str = "monthly"
     fill_model: str | None = None
     slippage_model: str | None = None
     commission: CommissionConfig | None = None
@@ -101,5 +142,13 @@ class BacktestResult:
 class BaseEngine:
     """Backtest engine contract."""
 
-    def run(self, strategy: BaseStrategy, data: pl.DataFrame, config: BacktestConfig) -> BacktestResult:
+    def run(
+        self,
+        strategy: BaseStrategy,
+        data: pl.DataFrame,
+        config: BacktestConfig,
+        *,
+        pipeline=None,
+        ohlcv: pl.DataFrame | None = None,
+    ) -> BacktestResult:
         raise NotImplementedError
