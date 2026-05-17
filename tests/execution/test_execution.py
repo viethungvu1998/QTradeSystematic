@@ -43,8 +43,18 @@ async def test_order_router_dispatches_by_asset_type():
     crypto = MockBroker()
     router = OrderRouter({AssetType.STOCK: stock, AssetType.CRYPTO: crypto})
     orders = [
-        Order(Instrument("AAPL", AssetType.STOCK, "NASDAQ", "USD"), OrderSide.BUY, OrderType.MARKET, Decimal("1")),
-        Order(Instrument("BTC/USDT", AssetType.CRYPTO, "BINANCE", "USDT"), OrderSide.SELL, OrderType.MARKET, Decimal("1")),
+        Order(
+            Instrument("AAPL", AssetType.STOCK, "NASDAQ", "USD"),
+            OrderSide.BUY,
+            OrderType.MARKET,
+            Decimal("1"),
+        ),
+        Order(
+            Instrument("BTC/USDT", AssetType.CRYPTO, "BINANCE", "USDT"),
+            OrderSide.SELL,
+            OrderType.MARKET,
+            Decimal("1"),
+        ),
     ]
     await router.execute(orders)
     assert len(stock.orders) == 1
@@ -77,3 +87,18 @@ async def test_sync_positions_creates_instruments_for_new_targets(stock_ohlcv):
     assert len(orders) == 1
     assert orders[0].instrument.symbol == "AAPL"
     assert orders[0].instrument.currency == "USD"
+
+
+@pytest.mark.asyncio
+async def test_sync_positions_creates_quote_currency_for_crypto_futures(crypto_futures_ohlcv):
+    broker = MockBroker()
+    orders = await sync_positions(
+        config=None,
+        syncer=PositionSync(),
+        brokers={AssetType.CRYPTO_FUTURES: broker},
+        target_weights={"PERP:BTC/USDT": Decimal("0.1")},
+        data=crypto_futures_ohlcv,
+    )
+    assert len(orders) == 1
+    assert orders[0].instrument.asset_type is AssetType.CRYPTO_FUTURES
+    assert orders[0].instrument.currency == "USDT"

@@ -1,18 +1,29 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import polars as pl
 
 from qts.config.builder import Config
+from qts.core.instrument import AssetType
+from qts.data._schemas import DataType
 from qts.data.sources.binance import BinanceDataSource, BinanceFuturesDataSource
 from qts.data.sources.dnse import DNSEDataSource
 from qts.data.sources.fmp import FMPDataSource
-from qts.orchestration.flows.data_fetch_flow import data_fetch_flow
 from qts.orchestration.flow import qts_flow
+from qts.orchestration.flows.data_fetch_flow import data_fetch_flow
+from qts.orchestration.runtime import resolved_brokers
+from qts.orchestration.tasks.data_tasks import download_futures_ohlcv, download_ohlcv
 
 
-async def test_qts_flow_research_and_live(monkeypatch, config_dir, stock_ohlcv, crypto_ohlcv, tmp_path):
+async def test_qts_flow_research_and_live(
+    monkeypatch,
+    config_dir,
+    stock_ohlcv,
+    crypto_ohlcv,
+    tmp_path,
+):
     original_build = Config.build
     monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))
 
@@ -31,7 +42,13 @@ async def test_qts_flow_research_and_live(monkeypatch, config_dir, stock_ohlcv, 
     assert isinstance(live_result["orders"], list)
 
 
-async def test_data_fetch_flow_idempotent(monkeypatch, config_dir, stock_ohlcv, crypto_ohlcv, tmp_path):
+async def test_data_fetch_flow_idempotent(
+    monkeypatch,
+    config_dir,
+    stock_ohlcv,
+    crypto_ohlcv,
+    tmp_path,
+):
     original_build = Config.build
     monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))
 
@@ -166,3 +183,179 @@ backtest_engine: vectorbt
     assert set(result.metrics) == {"sharpe", "sortino", "cagr", "max_drawdown", "win_rate"}
     assert all(signal_date.day == 1 for signal_date in result.signals["date"].to_list())
     assert result.signals["date"].n_unique() == result.signals.height
+
+
+async def test_download_tasks_include_vn_warrants_and_vn_futures():
+    calls = []
+
+    class FakeManager:
+        async def get(self, data_type, symbols, **kwargs):
+            calls.append((data_type, list(symbols), kwargs))
+            return pl.DataFrame()
+
+    config = SimpleNamespace(
+        universe=SimpleNamespace(
+            stock=[],
+            vn_stock=[],
+            vn_warrant=["VNM"],
+            vn_futures=["VNF:VN30F2503"],
+            crypto=[],
+            crypto_futures=[],
+        ),
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 20),
+    )
+
+    await download_ohlcv(config, FakeManager())
+    await download_futures_ohlcv(config, FakeManager())
+
+    assert calls == [
+        (
+            DataType.OHLCV,
+            ["VNW:VNM"],
+            {"start": date(2024, 1, 1), "end": date(2024, 3, 20)},
+        ),
+        (
+            DataType.FUTURES_OHLCV,
+            ["VNF:VN30F1M"],
+            {"start": date(2024, 1, 1), "end": date(2024, 3, 20)},
+        ),
+    ]
+
+
+async def test_qts_flow_passes_vn_sources_to_data_manager(monkeypatch):
+    captured = {}
+    sentinel_warrant = object()
+    sentinel_futures = object()
+
+    class FakePipeline:
+        def requires_fundamentals(self) -> bool:
+            return False
+
+        def with_fundamentals(self, fundamentals):
+            return self
+
+    config = SimpleNamespace(
+        asset_types=["vn_warrant", "vn_futures"],
+        workflow="research",
+        features=SimpleNamespace(fundamental=False),
+    )
+    resolved = SimpleNamespace(
+        raw=config,
+        stock_source=None,
+        vn_stock_source=None,
+        vn_warrant_source=sentinel_warrant,
+        vn_futures_source=sentinel_futures,
+        crypto_source=None,
+        crypto_futures_source=None,
+        storage=object(),
+        cache=object(),
+        bundle_adapter=object(),
+        feature_pipeline=FakePipeline(),
+        strategy=object(),
+        engine=object(),
+    )
+    resolved.with_fundamentals = lambda fundamentals: resolved.feature_pipeline
+
+    class FakeManager:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    async def fake_download_ohlcv(config, manager):
+        return pl.DataFrame()
+
+    async def fake_download_futures_ohlcv(config, manager):
+        return pl.DataFrame()
+
+    def fake_build_features(config, pipeline, ohlcv):
+        return pl.DataFrame()
+
+    def fake_run_backtest(config, engine, strategy, featured, **kwargs):
+        return SimpleNamespace(metrics={"sharpe": 0.0}, signals=pl.DataFrame())
+
+    monkeypatch.setattr(Config, "build", staticmethod(lambda path: resolved))
+    monkeypatch.setattr("qts.orchestration.runtime.DataManager", FakeManager)
+    monkeypatch.setattr("qts.orchestration.flow.download_ohlcv", fake_download_ohlcv)
+    monkeypatch.setattr(
+        "qts.orchestration.flow.download_futures_ohlcv",
+        fake_download_futures_ohlcv,
+    )
+    monkeypatch.setattr("qts.orchestration.flow.build_features", fake_build_features)
+    monkeypatch.setattr("qts.orchestration.flow.run_backtest", fake_run_backtest)
+
+    await qts_flow("unused.yaml")
+
+    assert captured["vn_warrant_source"] is sentinel_warrant
+    assert captured["vn_futures_source"] is sentinel_futures
+
+
+async def test_data_fetch_flow_routes_vn_symbols(monkeypatch):
+    captured = {"init": None, "gets": []}
+    config = SimpleNamespace(
+        universe=SimpleNamespace(
+            stock=[],
+            vn_stock=[],
+            vn_warrant=["VNM"],
+            vn_futures=["VNF:VN30F2503"],
+            crypto=[],
+            crypto_futures=[],
+        ),
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 20),
+    )
+    resolved = SimpleNamespace(
+        raw=config,
+        stock_source=None,
+        vn_stock_source=None,
+        vn_warrant_source="vn-warrant-source",
+        vn_futures_source="vn-futures-source",
+        crypto_source=None,
+        crypto_futures_source=None,
+        storage=object(),
+        cache=object(),
+    )
+
+    class FakeManager:
+        def __init__(self, **kwargs):
+            captured["init"] = kwargs
+
+        async def get(self, data_type, symbols, **kwargs):
+            captured["gets"].append((data_type, list(symbols), kwargs))
+            return pl.DataFrame()
+
+    monkeypatch.setattr(Config, "build", staticmethod(lambda path: resolved))
+    monkeypatch.setattr("qts.orchestration.runtime.DataManager", FakeManager)
+
+    await data_fetch_flow("unused.yaml", ["vn_warrant", "vn_futures"], ["ohlcv", "futures_ohlcv"])
+
+    assert captured["init"]["vn_warrant_source"] == "vn-warrant-source"
+    assert captured["init"]["vn_futures_source"] == "vn-futures-source"
+    assert captured["gets"] == [
+        (
+            DataType.OHLCV,
+            ["VNW:VNM", "VNF:VN30F1M"],
+            {"start": date(2024, 1, 1), "end": date(2024, 3, 20)},
+        ),
+        (
+            DataType.FUTURES_OHLCV,
+            ["VNW:VNM", "VNF:VN30F1M"],
+            {"start": date(2024, 1, 1), "end": date(2024, 3, 20)},
+        ),
+    ]
+
+
+def test_resolved_brokers_collects_extended_asset_types():
+    resolved = SimpleNamespace(
+        stock_broker="stock-broker",
+        vn_stock_broker=None,
+        vn_warrant_broker="vn-warrant-broker",
+        vn_futures_broker="vn-futures-broker",
+        crypto_broker=None,
+        crypto_futures_broker="crypto-futures-broker",
+    )
+    assert resolved_brokers(resolved) == {
+        AssetType.STOCK: "stock-broker",
+        AssetType.VN_WARRANT: "vn-warrant-broker",
+        AssetType.VN_FUTURES: "vn-futures-broker",
+        AssetType.CRYPTO_FUTURES: "crypto-futures-broker",
+    }

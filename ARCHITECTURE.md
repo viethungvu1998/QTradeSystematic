@@ -92,7 +92,9 @@ KBS (`vnstock` / `vnstock_futures`) details:
 - Equity/warrant prices are returned in thousands of VND (divide by 1000 → VND/1000 unit).
 - Index and futures prices are returned in full points (no scaling).
 - VN30 futures symbols: old format `VNF:VN30F2606` is auto-converted to KRX format `41I1G6000` for contracts expiring May 2025 or later.
-- DNSE (`openapi.dnse.com.vn`) requires HMAC-SHA256 auth and is geo-restricted to Vietnamese IPs; use `vnstock` as the primary source from outside Vietnam.
+- DNSE (`openapi.dnse.com.vn`) requires API key/secret auth with the current OpenAPI signature headers and is geo-restricted to Vietnamese IPs; use `vnstock` as the primary source from outside Vietnam.
+- DNSE futures requests are normalized to rolling aliases such as `VNF:VN30F1M`, even when the input uses a dated symbol such as `VNF:VN30F2503`.
+- DNSE warrant-underlying requests such as `VNW:VNM` are expanded into concrete warrant symbols for fetch, cache, and storage, for example `VNW:CVNM2511`.
 
 Fundamentals pipeline (`vnstock` source):
 
@@ -104,8 +106,8 @@ Fundamentals pipeline (`vnstock` source):
 
 Important implementation detail:
 
-- `Config.build()` instantiates data sources with their default constructors.
-- That means the registry wiring exists, but real API client construction is still a separate integration step.
+- `Config.build()` prefers `from_env()` for `dnse`, `vnstock`, and `vnstock_futures`.
+- If required env vars are missing for a source that supports `from_env()`, the builder falls back to the default constructor so fixture-oriented tests still work.
 
 ### `qts/research`
 
@@ -123,6 +125,8 @@ qts/research/
 #### Features
 
 - `FeaturePipeline.fit_transform()` always starts with `preprocess_ohlcv()`
+- `FeaturePipeline.requires_fundamentals()` lets orchestration ask whether external fundamentals must be downloaded
+- `FeaturePipeline.with_fundamentals()` returns a bound copy instead of mutating the original pipeline in place
 - Legacy `technical` feature still exists
 - Fine-grained indicator plugins live under `features/indicators/`
 
@@ -130,6 +134,7 @@ Registered feature keys:
 
 - `technical`
 - `fundamental`
+- `vn_fundamental`
 - `onchain`
 - `rsi`
 - `roc`
@@ -207,10 +212,10 @@ Current broker registrations:
 |---|---|---|
 | `moomoo` | `MoomooBroker` | Fixture-friendly unless a client is injected |
 | `binance` | `BinanceBroker` | Can build a real spot client via `from_env()` |
+| `dnse` | `DNSEBroker` | Implemented and decorated in-module, but not auto-imported by `qts.execution.brokers.__init__` |
 
 Notes:
 
-- `qts/execution/brokers/dnse.py` exists but currently has no implementation or registry entry.
 - `PositionSync` and `OrderRouter` are operational and used by `qts_flow` in `live` mode.
 
 ### `qts/orchestration`
@@ -220,6 +225,7 @@ Async orchestration and Prefect compatibility.
 ```text
 qts/orchestration/
 ├── flow.py
+├── runtime.py
 ├── prefect_compat.py
 ├── serve.py
 ├── flows/
@@ -233,18 +239,19 @@ Current flow surface:
 
 Current flow behavior:
 
-- `qts_flow()` downloads spot OHLCV plus `crypto_futures` data when configured, combines them into one panel, then runs research or live execution logic.
-- `data_fetch_flow()` accepts `crypto_futures` in `asset_types` and routes `futures_ohlcv` requests through the same `DataManager` path as other asset classes.
+- `qts_flow()` builds runtime collaborators from `ResolvedConfig`, downloads `stock`, `vn_stock`, `vn_warrant`, and spot `crypto` OHLCV plus `vn_futures` and `crypto_futures` data when configured, binds fundamentals into a copied feature pipeline only when required, then runs research or live execution logic.
+- `data_fetch_flow()` resolves requested asset classes through shared symbol-routing helpers, including `vn_warrant`, `vn_futures`, and `crypto_futures`, and uses the same `DataManager` assembly path as the main flow.
 
 `prefect_compat.py` provides a fallback `flow`, `task`, and `serve` shim when Prefect is not installed.
 
-Current deployment registration in `serve.py` creates five data-refresh deployments:
+Current deployment registration in `serve.py` creates six data-refresh deployments:
 
 - `stock-ohlcv-daily`
 - `vn-stock-ohlcv-daily`
 - `crypto-ohlcv-daily`
 - `crypto-funding-8h`
 - `stock-fundamentals-weekly`
+- `vn-stock-fundamentals-weekly`
 
 ### `qts/config`
 
@@ -252,6 +259,8 @@ Configuration parsing and runtime resolution.
 
 - `load_config()` validates YAML and returns `BacktestConfig`
 - `Config.build()` resolves registry keys into concrete runtime objects
+- `ResolvedConfig.data_sources()` and `ResolvedConfig.brokers()` expose assembled asset-type maps for orchestration
+- `ResolvedConfig.with_fundamentals()` binds external fundamentals into a copied feature pipeline
 
 Current behavior to keep in mind:
 
@@ -272,10 +281,11 @@ Refactor direction:
 ```text
 config_path
   -> Config.build()
-  -> DataManager
+  -> build_data_manager()
   -> download_ohlcv()
   -> optional download_futures_ohlcv()
   -> optional download_fundamentals()
+  -> feature_pipeline.with_fundamentals()
   -> FeaturePipeline.fit_transform()
   -> engine.run()
   -> BacktestResult
@@ -286,12 +296,13 @@ config_path
 ```text
 config_path
   -> Config.build()
-  -> DataManager
+  -> build_data_manager()
   -> download_ohlcv() + optional download_futures_ohlcv()
   -> build_features()
   -> run_backtest()
   -> latest target weights
   -> PositionSync.compute_deltas()
+  -> build_order_router()
   -> OrderRouter.execute()
 ```
 
@@ -301,4 +312,5 @@ These are the main architecture gaps between the implemented modules and the top
 
 - validation metadata is parsed, but there is no automatic research-vs-validation gate
 - several adapters are framework stubs awaiting real client wiring
+- broker package bootstrap still hand-picks imports, so `DNSEBroker` is not loaded by `import qts` alone
 - there is no packaged CLI layer yet

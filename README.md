@@ -1,6 +1,6 @@
 # QTradeSystematic
 
-Config-driven research and execution framework for systematic trading across stocks, VN stocks, spot crypto, and crypto futures.
+Config-driven research and execution framework for systematic trading across stocks, VN stocks, VN warrants, VN futures, spot crypto, and crypto futures.
 
 ## Current Status
 
@@ -15,7 +15,7 @@ The most important current-state details are:
 - There is no CLI entry point yet.
 - `qts_flow` is `async` and takes a config path string, not a prebuilt config object.
 - `validation` is a config mode with extra required fields, but the runtime does not automatically compare research and validation results or enforce `promotion_gate`.
-- `crypto_futures` is wired through both `qts_flow` and `data_fetch_flow`.
+- `vn_warrant`, `vn_futures`, and `crypto_futures` are wired through the top-level flows.
 
 ## What Exists Today
 
@@ -23,10 +23,13 @@ The most important current-state details are:
 
 - Typed YAML loader: `qts.config.load_config`
 - Runtime resolver: `qts.config.Config.build`
+- Runtime assembly helpers: `qts.orchestration.runtime`
 - Registry-driven plugins for data sources, features, strategies, engines, brokers, and simulation models
 - Unified `AssetType` routing from symbol format:
   - `AAPL` -> `stock`
   - `VN:VNM` -> `vn_stock`
+  - `VNW:VNM` -> `vn_warrant`
+  - `VNF:VN30F2503` -> `vn_futures`
   - `BTC/USDT` -> `crypto`
   - `PERP:BTC/USDT` -> `crypto_futures`
 
@@ -46,9 +49,11 @@ The most important current-state details are:
 
 Current adapter status:
 
-- `binance` and `binance_futures` can build real clients via `from_env()`
-- `fmp`, `yahoo`, and `dnse` are currently fixture-friendly adapters that expect injected payloads
-- `Config.build()` instantiates adapters with default constructors, so real API wiring is still a manual integration step
+- `vnstock`, `vnstock_futures`, and `dnse` can build real clients via `from_env()`
+- `binance` and `binance_futures` expose `from_env()` on the adapter, but `Config.build()` currently instantiates them via the default constructor
+- `fmp` and `yahoo` are still fixture-friendly adapters that expect injected payloads
+- `dnse` supports live VN equity data, rolling VN30 futures aliases, and warrant-underlying expansion when running from a Vietnamese IP
+- `Config.build()` prefers `from_env()` only for `dnse`, `vnstock`, and `vnstock_futures`, with safe fallback to default constructors where applicable
 
 ### Research layer
 
@@ -56,6 +61,7 @@ Current adapter status:
 - Built-in features:
   - `technical`
   - `fundamental`
+  - `vn_fundamental`
   - `onchain`
   - `forward_returns`
 - Indicator plugins:
@@ -101,6 +107,7 @@ Supported direction:
 
 - `MoomooBroker` is currently fixture-friendly unless a client is injected
 - `BinanceBroker` supports real credentials through `from_env()`
+- `DNSEBroker` is implemented in `qts/execution/brokers/dnse.py`, but `qts.execution.brokers.__init__` does not auto-import it yet
 - `OrderRouter` executes concurrently across broker instances
 - `PositionSync` converts target weights into rebalance orders
 
@@ -108,6 +115,7 @@ Supported direction:
 
 - Main flow: `qts/orchestration/flow.py`
 - Data-only flow: `qts/orchestration/flows/data_fetch_flow.py`
+- Runtime composition helpers: `qts/orchestration/runtime.py`
 - Prefect compatibility shim: `qts/orchestration/prefect_compat.py`
 - Deployment registration: `qts/orchestration/serve.py`
 
@@ -170,10 +178,11 @@ rebalance_frequency: monthly
 Notes:
 
 - `features.technical: true` still works as a backward-compatible shortcut.
+- `qts_flow()` builds runtime collaborators from `ResolvedConfig`, then binds fundamentals into the feature pipeline only when a feature explicitly requests them.
 - all strategy-specific parameters, including stat-arb knobs, belong under `strategy.params`; there is no supported parallel stat-arb-only backtest config surface.
 - `promotion_gate` is parsed for `validation` configs, but it is not enforced inside `qts_flow`.
 - `brokers.binance_mode` is stored in config, but `Config.build()` does not yet use it to instantiate brokers automatically.
-- both orchestration flows accept `crypto_futures` in config and route them through `binance_futures` when configured.
+- `data_fetch_flow()` accepts `stock`, `vn_stock`, `vn_warrant`, `vn_futures`, `crypto`, and `crypto_futures` in `asset_types` and resolves symbols through the same routing helpers used by the main flow.
 - example configs document schema and wiring, but real execution still requires working adapter clients or injected fixture payloads.
 
 ## Usage

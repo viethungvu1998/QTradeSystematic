@@ -1,0 +1,4 @@
+interface:
+  display_name: "QTS Refactor"
+  short_description: "Deep-refactor QTS code to lighter polymorphic architecture."
+  default_prompt: "Use $qts-refactor to deeply refactor this QTradeSystematic code into a lighter-weight version that preserves features and follows QTradeSystematic/CODING_RULES.md."

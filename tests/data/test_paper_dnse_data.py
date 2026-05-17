@@ -39,17 +39,15 @@ async def test_dnse_vn_stock_ohlcv(dnse):
 
 @pytest.mark.asyncio
 async def test_dnse_vn_warrant_ohlcv(dnse):
-    """Covered warrant: fetch active CW on VNM (symbol depends on expiry)."""
-    # CVNM2403 expired — use a symbol that was active in Q1 2025.
-    # Adjust if no active CW exists; DNSE returns empty arrays for expired symbols.
-    result = await dnse.get_ohlcv("VNW:CVNM2501", _START, _END, "1d")
-    print(f"\n[VN_WARRANT] VNW:CVNM2501  rows={result.height}")
+    """Covered warrants: resolve current VNM warrants and fetch them as a basket."""
+    result = await dnse.get_ohlcv("VNW:VNM", _START, _END, "1d")
+    print(f"\n[VN_WARRANT] VNW:VNM  rows={result.height}")
     if result.height > 0:
         print(result.head(3))
         assert result.columns == OHLCV_COLUMNS
-        assert (result["symbol"] == "VNW:CVNM2501").all()
+        assert result["symbol"].str.starts_with("VNW:CVNM").all()
     else:
-        print("  (no data — warrant may have expired; schema still valid)")
+        print("  (no active VNM warrants returned; schema still valid)")
         assert result.columns == OHLCV_COLUMNS
 
 
@@ -57,11 +55,11 @@ async def test_dnse_vn_warrant_ohlcv(dnse):
 async def test_dnse_vn_futures_ohlcv(dnse):
     """VN30 index futures: active front-month contract."""
     result = await dnse.get_ohlcv("VNF:VN30F2503", _START, _END, "1d")
-    print(f"\n[VN_FUTURES] VNF:VN30F2503  rows={result.height}")
+    print(f"\n[VN_FUTURES] VNF:VN30F1M  rows={result.height}")
     print(result.head(3))
     assert result.columns == OHLCV_COLUMNS
     assert result.height > 0
-    assert (result["symbol"] == "VNF:VN30F2503").all()
+    assert (result["symbol"] == "VNF:VN30F1M").all()
     assert result["close"].min() > 0
 
 
@@ -73,6 +71,7 @@ async def test_dnse_futures_via_fetch_dispatch(dnse):
         start=_START, end=_END, interval="1d",
     )
     assert result.height > 0
+    assert (result["symbol"] == "VNF:VN30F1M").all()
 
 
 @pytest.mark.asyncio

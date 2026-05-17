@@ -18,13 +18,14 @@ Use `workflow: research` in YAML.
 Runtime path:
 
 1. `qts_flow()` calls `Config.build(config_path)`
-2. `DataManager` is created from the resolved config
-3. `download_ohlcv()` fetches `stock`, `vn_stock`, and spot `crypto`
-4. `download_futures_ohlcv()` fetches `crypto_futures` when present in config
-5. `download_fundamentals()` runs only when `features.fundamental` is enabled
-6. `FeaturePipeline.fit_transform()` preprocesses OHLCV, then applies configured features
-7. `run_backtest()` executes the configured engine
-8. The flow returns a `BacktestResult`
+2. `build_data_manager()` assembles `DataManager` from `ResolvedConfig`
+3. `download_ohlcv()` fetches `stock`, `vn_stock`, `vn_warrant`, and spot `crypto`
+4. `download_futures_ohlcv()` fetches `vn_futures` and `crypto_futures` when present in config
+5. `download_fundamentals()` runs only when the configured feature pipeline declares `requires_fundamentals()`
+6. `ResolvedConfig.with_fundamentals()` binds those fundamentals into a copied feature pipeline
+7. `FeaturePipeline.fit_transform()` preprocesses OHLCV, then applies configured features
+8. `run_backtest()` executes the configured engine
+9. The flow returns a `BacktestResult`
 
 Important notes:
 
@@ -69,13 +70,14 @@ Use `workflow: live` in YAML.
 Runtime path:
 
 1. `qts_flow()` resolves config and dependencies
-2. OHLCV is downloaded for `stock`, `vn_stock`, spot `crypto`, and `crypto_futures`
+2. OHLCV is downloaded for `stock`, `vn_stock`, `vn_warrant`, and spot `crypto`, plus futures data for `vn_futures` and `crypto_futures`
 3. features are built from the combined panel
 4. the configured backtest engine generates a `BacktestResult`
 5. the latest signal row per symbol is converted into target weights
 6. `PositionSync` computes delta orders from broker positions and account value
-7. `OrderRouter` dispatches orders concurrently
-8. the flow returns a dict with:
+7. `build_order_router()` assembles the live broker map from `ResolvedConfig`
+8. `OrderRouter` dispatches orders concurrently
+9. the flow returns a dict with:
    - `result`
    - `orders`
    - `fills`
@@ -84,7 +86,8 @@ Runtime path:
 Current live-mode caveats:
 
 - `MoomooBroker` is fixture-friendly unless a client is injected
-- `BinanceBroker` supports real credentials through `from_env()`, but `Config.build()` does not call `from_env()` automatically
+- `BinanceBroker` supports real credentials through `from_env()`, but `Config.build()` currently instantiates brokers through their default constructors
+- `DNSEBroker` is implemented, but `qts.execution.brokers.__init__` does not auto-import it yet
 - `brokers.binance_mode` is parsed into config but not applied during object construction
 
 ## 4. Data Refresh
@@ -100,8 +103,9 @@ async def data_fetch_flow(config_path: str, asset_types: list[str], data_types: 
 Current behavior:
 
 - resolves config with `Config.build()`
-- builds a `DataManager`
-- reads symbols from `stock`, `vn_stock`, `crypto`, and `crypto_futures` universes
+- builds a `DataManager` through `build_data_manager(..., include_bundle=False)`
+- resolves symbols through the shared `requested_symbols()` helper
+- supports `stock`, `vn_stock`, `vn_warrant`, `vn_futures`, `crypto`, and `crypto_futures`
 - calls `manager.get(DataType(...), symbols, start=..., end=...)`
 
 Example:
@@ -116,7 +120,7 @@ asyncio.run(data_fetch_flow("examples/research_zipline.yaml", ["stock"], ["ohlcv
 
 ## 5. Deployment Registration
 
-`qts/orchestration/serve.py` registers five data-refresh deployments through the Prefect compatibility layer.
+`qts/orchestration/serve.py` registers six data-refresh deployments through the Prefect compatibility layer.
 
 Current deployments:
 
@@ -127,19 +131,7 @@ Current deployments:
 | `crypto-ohlcv-daily` | `["crypto"]` | `["ohlcv"]` | `0 0 * * *` |
 | `crypto-funding-8h` | `["crypto"]` | `["funding_rates"]` | `0 */8 * * *` |
 | `stock-fundamentals-weekly` | `["stock"]` | `["fundamentals"]` | `0 8 * * 1` |
-
-VN fundamentals are not yet a registered deployment. To crawl manually:
-
-```python
-import asyncio
-from qts.data.sources.vnstock import VnstockDataSource
-
-src = VnstockDataSource.from_env()
-# Annual (12 years), force fresh cache
-df = asyncio.run(src.get_fundamentals("VN:VNM", termtype=1, pages=3, force_refresh=True))
-# Quarterly (8 quarters)
-df_q = asyncio.run(src.get_fundamentals("VN:VNM", termtype=2, pages=2))
-```
+| `vn-stock-fundamentals-weekly` | `["vn_stock"]` | `["fundamentals"]` | `0 8 * * 1` |
 
 Run it with:
 
@@ -162,15 +154,15 @@ initial_capital: 100000    # required for research and validation
 universe:
   stock: []
   vn_stock: []          # VN: prefix, e.g. VN:VNM
-  vn_futures: []        # VNF: prefix, e.g. VNF:VN30F2606 or VNF:41I1G6000
-  vn_warrant: []        # VNW: prefix, e.g. VNW:CACB2601
+  vn_futures: []        # VNF: prefix; DNSE accepts dated inputs and normalizes them to rolling aliases like VNF:VN30F1M
+  vn_warrant: []        # DNSE can take an underlying like VNM or VNW:VNM and expand it into all currently listed warrants
   crypto: []
   crypto_futures: []
 data_sources:
   stock: fmp | yahoo
   vn_stock: vnstock     # KBS public API — use dnse only from Vietnamese IP
   vn_futures: vnstock_futures
-  vn_warrant: vnstock
+  vn_warrant: vnstock   # with dnse, warrant-underlying requests expand to concrete codes such as VNW:CVNM2511
   crypto: binance
   crypto_futures: binance_futures
 storage: duckdb
@@ -193,6 +185,7 @@ Interpretation rules:
 
 - all strategy-specific options, including stat-arb settings, live under `strategy.params`
 - the existing feature booleans remain valid for YAML compatibility
+- registry-driven feature entries can also reference plugins such as `vn_fundamental`
 - cleanup work should normalize those booleans and storage resolution through registries without changing the public YAML shape in the same pass
 
 Validation-only required keys:

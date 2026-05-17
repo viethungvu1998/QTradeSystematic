@@ -65,7 +65,10 @@ VN-specific notes:
 
 - `vnstock` covers VN equities (`VN:`), VN indices (`VN:VN30` etc.), and covered warrants (`VNW:`).
 - `vnstock_futures` covers VN30 index futures (`VNF:`); auto-converts old `VN30F2606` format to KRX `41I1G6000` for contracts from May 2025 onward.
-- `dnse` serves as an alternative VN OHLCV source when running from a Vietnamese IP; uses HMAC-SHA256 auth via `DNSE_API_KEY` / `DNSE_API_SECRET` env vars.
+- `dnse` serves as an alternative VN OHLCV source when running from a Vietnamese IP; uses DNSE OpenAPI auth via `DNSE_API_KEY` / `DNSE_API_SECRET`.
+- `dnse` accepts VN stock symbols like `VN:VNM`, VN futures requests like `VNF:VN30F2503`, and VN warrant-underlying requests like `VNW:VNM`.
+- `dnse` normalizes VN futures requests to DNSE's rolling aliases such as `VNF:VN30F1M`.
+- `dnse` expands warrant-underlying requests into concrete warrant symbols and stores the concrete codes, for example `VNW:CVNM2511`.
 - All sources normalize outputs into Polars frames with the canonical OHLCV schema.
 
 ## Storage
@@ -81,6 +84,7 @@ VN-specific notes:
 Pipeline behavior:
 
 - preprocessing occurs before any feature plugin
+- features can declare `requires_fundamentals()` and receive bound data through `with_fundamentals()`
 - feature plugins must append columns, not remove the existing OHLCV columns
 
 Built-in high-level features:
@@ -89,6 +93,10 @@ Built-in high-level features:
 - `fundamental`
 - `onchain`
 - `forward_returns`
+
+Other registered feature plugins:
+
+- `vn_fundamental`
 
 Indicator plugins:
 
@@ -167,6 +175,7 @@ Registered broker keys:
 
 - `moomoo`
 - `binance`
+- `dnse` in `qts/execution/brokers/dnse.py`
 
 Execution utilities:
 
@@ -177,7 +186,7 @@ Current status:
 
 - `MoomooBroker` works as a fixture-friendly adapter unless a client is injected
 - `BinanceBroker` can build a real client with `from_env()`
-- there is no registered VN broker yet
+- `DNSEBroker` is implemented, but `qts.execution.brokers.__init__` does not auto-import it yet
 
 ## Orchestration
 
@@ -185,6 +194,7 @@ Implemented:
 
 - `qts_flow(config_path)`
 - `data_fetch_flow(config_path, asset_types, data_types)`
+- shared runtime assembly in `qts/orchestration/runtime.py`
 - Prefect compatibility shim for environments without Prefect
 - deployment registration script in `qts/orchestration/serve.py`
 
@@ -192,7 +202,7 @@ Current gaps:
 
 - no CLI wrapper
 - no automatic validation promotion gate
-- no automatic environment-aware construction for real adapters from config alone
+- no automatic validation comparison between research and validation runs
 
 ## Tests
 

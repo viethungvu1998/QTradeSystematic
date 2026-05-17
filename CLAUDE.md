@@ -50,15 +50,15 @@ core/  ←  config/   (registry only)
 | `PERP:ETH/USDT` | `CRYPTO_FUTURES` | `BinanceFuturesDataSource` | `futures_prices` |
 | `BTC/USDT` | `CRYPTO` | `BinanceDataSource` | `crypto_prices` |
 | `VN:VNM` | `VN_STOCK` | `VnstockDataSource` / `DNSEDataSource` | `vn_stock_prices` |
-| `VNF:VN30F2606` | `VN_FUTURES` | `VnstockFuturesDataSource` | `vn_futures_prices` |
-| `VNW:CACB2601` | `VN_WARRANT` | `VnstockDataSource` | `vn_warrant_prices` |
+| `VNF:VN30F2503` | `VN_FUTURES` | `VnstockFuturesDataSource` / `DNSEDataSource` | `vn_futures_prices` |
+| `VNW:VNM` | `VN_WARRANT` | `VnstockDataSource` / `DNSEDataSource` | `vn_warrant_prices` |
 | `AAPL` | `STOCK` | `FMPDataSource` | `stock_prices` + Zipline bundle |
 
 `DataManager.__init__` builds a `(AssetType, DataType) → source` map from each source's `CAPABILITIES` frozenset. Adding a new source only requires declaring `CAPABILITIES` and passing the instance to `DataManager`.
 
 ### Config → runtime resolution
 
-`Config.build(path)` parses YAML → `BacktestConfig` (typed dataclass) → resolves every string key through `Registry` → returns `ResolvedConfig` with concrete instances. YAML keys like `"binance"` or `"fmp"` map to classes via `@Registry.register_data_source("key")`. An unregistered key raises `RegistryError` at build time, not at runtime.
+`Config.build(path)` parses YAML → `BacktestConfig` (typed dataclass) → resolves every string key through `Registry` → returns `ResolvedConfig` with concrete instances. `ResolvedConfig` also exposes `data_sources()`, `brokers()`, and `with_fundamentals()` so orchestration can assemble runtime collaborators without rebuilding asset-type maps inline. YAML keys like `"binance"` or `"fmp"` map to classes via `@Registry.register_data_source("key")`. An unregistered key raises `RegistryError` at build time, not at runtime.
 
 ### Plugin registration pattern
 

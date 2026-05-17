@@ -16,6 +16,10 @@ class BaseDataSource:
 
     CAPABILITIES: frozenset[DataType] = frozenset()
 
+    def expand_symbols(self, data_type: DataType, symbol: str, **kwargs) -> list[str]:
+        """Resolve a request symbol into one or more concrete fetch symbols."""
+        return [symbol]
+
     async def fetch(self, data_type: DataType, symbol: str, **kwargs) -> pl.DataFrame:
         raise NotImplementedError
 

@@ -14,6 +14,10 @@ class QTSError(Exception):
     """Base exception for the project."""
 
 
+class QTSWarning(Warning):
+    """Base warning for the project."""
+
+
 class RegistryError(QTSError):
     """Raised when a registry key cannot be resolved."""
 
@@ -35,6 +39,10 @@ class DataSourceError(QTSError):
             return f"{self.message} [{self.symbol}]"
         start, end = self.date_range
         return f"{self.message} [{self.symbol}] ({start} -> {end})"
+
+
+class DataSourceWarning(QTSWarning):
+    """Raised when a data source can serve a request with caveats."""
 
 
 @dataclass(slots=True)

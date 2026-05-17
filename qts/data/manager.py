@@ -77,8 +77,9 @@ class DataManager:
         }
 
     async def get(self, data_type: DataType, symbols: list[str], **kwargs) -> pl.DataFrame:
+        resolved_symbols = self._expand_symbols(data_type, symbols, **kwargs)
         frames = await asyncio.gather(
-            *(self._fetch_with_cache(data_type, symbol, **kwargs) for symbol in symbols)
+            *(self._fetch_with_cache(data_type, symbol, **kwargs) for symbol in resolved_symbols)
         )
         nonempty = [frame for frame in frames if frame.height > 0]
         if not nonempty:
@@ -124,6 +125,20 @@ class DataManager:
                 conditions.append(f"{time_column} <= '{end}'")
         query = f"SELECT * FROM {table} WHERE {' AND '.join(conditions)}"
         return self.storage.query(query)
+
+    def _expand_symbols(self, data_type: DataType, symbols: list[str], **kwargs) -> list[str]:
+        expanded: list[str] = []
+        for symbol in symbols:
+            asset_type = AssetType.from_symbol(symbol)
+            source = self._capability_map.get((asset_type, data_type))
+            if source is None:
+                expanded.append(symbol)
+                continue
+            resolved = source.expand_symbols(data_type, symbol, **kwargs)
+            if not resolved:
+                continue
+            expanded.extend(resolved)
+        return list(dict.fromkeys(expanded))
 
     def _table_name(self, asset_type: AssetType, data_type: DataType) -> str:
         return self._table_map.get((asset_type, data_type), data_type.value)

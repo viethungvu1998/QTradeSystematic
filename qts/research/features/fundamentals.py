@@ -36,6 +36,12 @@ class FundamentalFeatures(BaseFeature):
     def __init__(self, fundamentals: pl.DataFrame | None = None) -> None:
         self.fundamentals = fundamentals if fundamentals is not None else pl.DataFrame()
 
+    def requires_fundamentals(self) -> bool:
+        return True
+
+    def with_fundamentals(self, fundamentals: pl.DataFrame) -> BaseFeature:
+        return type(self)(fundamentals=fundamentals)
+
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         original = df
         if self.fundamentals.is_empty():

@@ -15,7 +15,7 @@ from qts.data.sources.dnse import DNSEDataSource
 from qts.data.sources.fmp import FMPDataSource
 from qts.data.sources.vnstock import VnstockDataSource, VnstockFuturesDataSource
 from qts.data.sources.yahoo import YahooDataSource
-from qts.core.errors import DataSourceError
+from qts.core.errors import DataSourceError, DataSourceWarning
 from qts.data.storage.duckdb import DuckDBStorage
 from qts.data.storage.parquet import ParquetStorage
 
@@ -243,7 +243,24 @@ async def test_dnse_futures_fixture_mode(vn_futures_ohlcv):
         start=date(2024, 1, 1), end=date(2024, 3, 20), interval="1d",
     )
     assert result.height > 0
-    assert result["symbol"][0] == "VNF:VN30F2503"
+    assert result["symbol"][0] == "VNF:VN30F1M"
+
+
+@pytest.mark.asyncio
+async def test_dnse_futures_warns_when_history_starts_after_request(vn_futures_ohlcv):
+    source = DNSEDataSource(ohlcv_payloads={"VNF:VN30F2503": vn_futures_ohlcv})
+    with pytest.warns(
+        DataSourceWarning,
+        match=r"starts on 2024-01-01, later than requested start 2023-01-01",
+    ):
+        result = await source.fetch(
+            DataType.FUTURES_OHLCV,
+            "VNF:VN30F2503",
+            start=date(2023, 1, 1),
+            end=date(2024, 3, 20),
+            interval="1d",
+        )
+    assert result.height > 0
 
 
 @pytest.mark.asyncio
@@ -252,6 +269,14 @@ async def test_dnse_warrant_fixture_mode(vn_warrant_ohlcv):
     result = await source.get_ohlcv("VNW:CVNM2403", date(2024, 1, 1), date(2024, 3, 20), "1d")
     assert result.height > 0
     assert result["symbol"][0] == "VNW:CVNM2403"
+
+
+@pytest.mark.asyncio
+async def test_dnse_warrant_underlying_fixture_mode(vn_warrant_ohlcv):
+    source = DNSEDataSource(ohlcv_payloads={"VNW:CVNM2403": vn_warrant_ohlcv})
+    result = await source.get_ohlcv("VNW:VNM", date(2024, 1, 1), date(2024, 3, 20), "1d")
+    assert result.height > 0
+    assert set(result["symbol"].unique().to_list()) == {"VNW:CVNM2403"}
 
 
 @pytest.mark.asyncio
@@ -278,6 +303,25 @@ async def test_data_manager_vn_warrant_routing(tmp_path, vn_warrant_ohlcv):
     assert "vn_warrant_prices" in duck.list_keys()
     assert "vn_stock_prices" not in duck.list_keys()
     assert data["symbol"][0] == "VNW:CVNM2403"
+
+
+@pytest.mark.asyncio
+async def test_data_manager_expands_vn_warrant_basket_symbols(tmp_path, vn_warrant_ohlcv):
+    duck = DuckDBStorage()
+    manager = DataManager(
+        stock_source=None,
+        crypto_source=None,
+        vn_warrant_source=DNSEDataSource(ohlcv_payloads={"VNW:CVNM2403": vn_warrant_ohlcv}),
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+    data = await manager.get(
+        DataType.OHLCV, ["VNW:VNM"], start=date(2024, 1, 1), end=date(2024, 3, 20)
+    )
+    assert data.height > 0
+    assert set(data["symbol"].unique().to_list()) == {"VNW:CVNM2403"}
+    stored = duck.query("SELECT DISTINCT symbol FROM vn_warrant_prices ORDER BY symbol")
+    assert stored["symbol"].to_list() == ["VNW:CVNM2403"]
 
 
 @pytest.mark.asyncio
