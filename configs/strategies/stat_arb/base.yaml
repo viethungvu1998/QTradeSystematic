@@ -1,0 +1,23 @@
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL, MSFT, GOOGL, AMZN, META]
+start_date: "2020-01-01"
+end_date: "2024-12-31"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  technical: false
+strategy:
+  type: stat_arb
+  params:
+    entry_zscore: 2.0
+    exit_zscore: 0.0
+    zscore_window: 22
+    max_pairs: 10
+    min_obs: 120
+backtest_engine: vectorbt
+rebalance_frequency: daily
+train_window: 252

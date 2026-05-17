@@ -1,10 +1,10 @@
 """Factor strategies."""
 
-from . import ml_model, model
+from . import factories, model
 from .base import BaseFactorStrategy
 
 __all__ = [
     "BaseFactorStrategy",
-    "ml_model",
+    "factories",
     "model",
 ]

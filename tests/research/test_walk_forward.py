@@ -4,9 +4,20 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import polars as pl
+import pytest
 
-from qts.research.backtest._runner import _rebalance_dates, run_backtest_frame, walk_forward_signals
-from qts.research.backtest.base import BacktestConfig, DataSourcesConfig, FeaturesConfig, StrategyConfig, UniverseConfig
+from qts.research.backtest._runner import (
+    _rebalance_dates,
+    run_backtest_frame,
+    walk_forward_signals,
+)
+from qts.research.backtest.base import (
+    BacktestConfig,
+    DataSourcesConfig,
+    FeaturesConfig,
+    StrategyConfig,
+    UniverseConfig,
+)
 from qts.research.backtest.engines.vectorbtpro_engine import VectorBTProEngine
 from qts.research.backtest.engines.zipline_engine import ZiplineEngine
 from qts.research.features.pipeline import FeaturePipeline
@@ -75,6 +86,14 @@ def test_rebalance_dates_daily_weekly_monthly():
     assert _rebalance_dates(dates, "daily") == dates
     assert _rebalance_dates(dates, "weekly") == [date(2024, 1, 29), date(2024, 2, 5)]
     assert _rebalance_dates(dates, "monthly") == [date(2024, 1, 29), date(2024, 2, 1)]
+    assert _rebalance_dates(dates, 3) == [
+        date(2024, 1, 29),
+        date(2024, 2, 1),
+        date(2024, 2, 4),
+        date(2024, 2, 7),
+    ]
+    with pytest.raises(ValueError, match="Unsupported rebalance frequency"):
+        _rebalance_dates(dates, "3d")
 
 
 def test_walk_forward_signals_monthly_uses_prior_window_only():
@@ -86,7 +105,14 @@ def test_walk_forward_signals_monthly_uses_prior_window_only():
     assert signals.height == 2
     assert signals["date"].to_list() == [date(2024, 2, 1), date(2024, 3, 1)]
     assert pipeline.max_dates == [date(2024, 1, 31), date(2024, 2, 29)]
-    assert all(train_date < rebalance_date for train_date, rebalance_date in zip(pipeline.max_dates, signals["date"].to_list(), strict=True))
+    assert all(
+        train_date < rebalance_date
+        for train_date, rebalance_date in zip(
+            pipeline.max_dates,
+            signals["date"].to_list(),
+            strict=True,
+        )
+    )
 
 
 def test_run_backtest_frame_uses_prebuilt_signals_and_forward_fills():
@@ -113,6 +139,39 @@ def test_run_backtest_frame_uses_prebuilt_signals_and_forward_fills():
     )
     assert result.signals.height == 2
     assert between.filter(pl.col("portfolio_return") > 0).height == between.height
+
+
+def test_run_backtest_frame_sums_weighted_returns_across_symbols():
+    data = pl.DataFrame(
+        {
+            "date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 1), date(2024, 1, 2)],
+            "symbol": ["AAPL", "AAPL", "MSFT", "MSFT"],
+            "open": [100.0, 110.0, 100.0, 90.0],
+            "high": [100.0, 110.0, 100.0, 90.0],
+            "low": [100.0, 110.0, 100.0, 90.0],
+            "close": [100.0, 110.0, 100.0, 90.0],
+            "volume": [1_000.0, 1_000.0, 1_000.0, 1_000.0],
+        }
+    )
+    prebuilt_signals = pl.DataFrame(
+        {
+            "date": [date(2024, 1, 2), date(2024, 1, 2)],
+            "symbol": ["AAPL", "MSFT"],
+            "signal": [1, -1],
+            "weight": [0.6, 0.4],
+        }
+    )
+
+    result = run_backtest_frame(
+        "vectorbt",
+        FailingStrategy(),
+        data,
+        _config(),
+        prebuilt_signals=prebuilt_signals,
+    )
+
+    jan_2_return = result.returns.filter(pl.col("date") == date(2024, 1, 2))["portfolio_return"][0]
+    assert jan_2_return == pytest.approx(0.10)
 
 
 def test_backtest_engines_accept_walk_forward_inputs():

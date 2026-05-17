@@ -45,6 +45,12 @@ async def qts_flow(config_path: str):
     """Single workflow entry point."""
 
     resolved = Config.build(config_path)
+    return await run_resolved_config(resolved)
+
+
+async def run_resolved_config(resolved):
+    """Run an already resolved config through the canonical QTS path."""
+
     config = resolved.raw
     manager = build_data_manager(resolved)
     ohlcv = await download_ohlcv(config, manager)

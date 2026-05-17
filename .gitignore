@@ -4,4 +4,7 @@ __pycache__/
 .ruff_cache/
 *.pyc
 .env
+docker/env/.env
+docker/env/*.env
+!docker/env/.env.example
 .qts_notebook_runtime

@@ -1,0 +1,44 @@
+base_config: ../factor/base.yaml
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL, MSFT, GOOGL, AMZN, META]
+start_date: "2022-01-01"
+end_date: "2024-12-31"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  indicators:
+    - name: rsi
+      params: {periods: [14]}
+    - name: roc
+      params: {periods: [21]}
+  forward_returns:
+    periods: [21]
+strategy:
+  type: ml_factor
+  params:
+    rebalance_period: 10
+    min_train_rows: 20
+    predictor_cols: [rsi_14, roc_21]
+    target_col: forward_return_21
+    trainer:
+      name: xgb_classifier
+      params:
+        model_params:
+          objective: multi:softprob
+          num_class: 5
+          eval_metric: mlogloss
+          n_estimators: 50
+          max_depth: 3
+          random_state: 42
+    portfolio:
+      name: equal_weight
+      params:
+        num_long_positions: 3
+        num_short_positions: 0
+backtest_engine: vectorbt
+rebalance_frequency: 10
+train_window: 252

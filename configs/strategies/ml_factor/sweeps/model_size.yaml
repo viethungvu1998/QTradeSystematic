@@ -1,0 +1,31 @@
+base_config: ../base.yaml
+tracking:
+  enabled: false
+  experiment_name: qts-ml-factor
+  run_name: ml-factor-model-size-sweep
+storage:
+  root: runs/ml-factor-model-size
+sweep:
+  mode: optuna
+  n_trials: 24
+  study_name: ml-factor-model-size
+  sampler:
+    name: tpe
+    seed: 42
+  objective:
+    metric: sharpe
+    direction: maximize
+  search_space:
+    - path: strategy.params.trainer.params.model_params.n_estimators
+      type: int
+      low: 25
+      high: 150
+      step: 25
+    - path: strategy.params.trainer.params.model_params.max_depth
+      type: int
+      low: 2
+      high: 6
+    - path: strategy.params.rebalance_period
+      type: int
+      low: 5
+      high: 20

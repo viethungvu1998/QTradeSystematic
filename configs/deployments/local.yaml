@@ -1,0 +1,15 @@
+work_pool_name: qts-process-pool
+build: false
+push: false
+deployments:
+  - name: factor-research
+    flow: research
+    parameters:
+      config_path: configs/strategies/factor/base.yaml
+  - name: stock-ohlcv-daily
+    flow: data_fetch
+    cron: "0 21 * * 1-5"
+    parameters:
+      config_path: configs/strategies/factor/base.yaml
+      asset_types: [stock]
+      data_types: [ohlcv]

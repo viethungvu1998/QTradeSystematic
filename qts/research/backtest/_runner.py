@@ -12,12 +12,16 @@ from qts.research.backtest.metrics import build_metrics
 from qts.research.strategies.base import BaseStrategy
 
 
-def _rebalance_dates(dates: list[date], frequency: str) -> list[date]:
-    if frequency == "daily":
+def _rebalance_dates(dates: list[date], frequency: str | int) -> list[date]:
+    interval = _parse_session_interval(frequency)
+    if interval is not None:
+        return dates[::interval]
+    normalized = str(frequency).strip().lower()
+    if normalized == "daily":
         return dates
-    if frequency == "weekly":
+    if normalized == "weekly":
         keys = [item.isocalendar()[:2] for item in dates]
-    elif frequency == "monthly":
+    elif normalized == "monthly":
         keys = [(item.year, item.month) for item in dates]
     else:
         raise ValueError(f"Unsupported rebalance frequency: {frequency}")
@@ -30,7 +34,20 @@ def _rebalance_dates(dates: list[date], frequency: str) -> list[date]:
     return selected
 
 
-def walk_forward_signals(pipeline, strategy, ohlcv: pl.DataFrame, config: BacktestConfig) -> pl.DataFrame:
+def _parse_session_interval(frequency: str | int) -> int | None:
+    if not isinstance(frequency, int) or isinstance(frequency, bool):
+        return None
+    if frequency < 1:
+        raise ValueError(f"Unsupported rebalance frequency: {frequency}")
+    return frequency
+
+
+def walk_forward_signals(
+    pipeline,
+    strategy,
+    ohlcv: pl.DataFrame,
+    config: BacktestConfig,
+) -> pl.DataFrame:
     all_dates = sorted(ohlcv["date"].unique().to_list())
     rebalance_dates = _rebalance_dates(all_dates, config.rebalance_frequency)
     date_index = {item: index for index, item in enumerate(all_dates)}
@@ -97,11 +114,13 @@ def run_backtest_frame(
             pl.col("weight").fill_null(0.0),
             (pl.col("close").pct_change().over("symbol")).fill_null(0.0).alias("asset_return"),
         )
-        .with_columns((pl.col("asset_return") * pl.col("signal") * pl.col("weight")).alias("strategy_return"))
+        .with_columns(
+            (pl.col("asset_return") * pl.col("signal") * pl.col("weight")).alias("strategy_return")
+        )
     )
     daily = (
         joined.group_by("date")
-        .agg(pl.col("strategy_return").mean().alias("portfolio_return"))
+        .agg(pl.col("strategy_return").sum().alias("portfolio_return"))
         .sort("date")
     )
     capital = float(config.initial_capital or Decimal("100000"))

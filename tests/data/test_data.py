@@ -5,6 +5,7 @@ from datetime import date
 import polars as pl
 import pytest
 
+from qts.core.errors import DataSourceError, DataSourceWarning
 from qts.core.events import Tick
 from qts.data._schemas import DataType
 from qts.data.base import BaseDataSource
@@ -14,8 +15,6 @@ from qts.data.sources.binance import BinanceDataSource, BinanceFuturesDataSource
 from qts.data.sources.dnse import DNSEDataSource
 from qts.data.sources.fmp import FMPDataSource
 from qts.data.sources.vnstock import VnstockDataSource, VnstockFuturesDataSource
-from qts.data.sources.yahoo import YahooDataSource
-from qts.core.errors import DataSourceError, DataSourceWarning
 from qts.data.storage.duckdb import DuckDBStorage
 from qts.data.storage.parquet import ParquetStorage
 
@@ -40,10 +39,20 @@ class CountingSource(BaseDataSource):
     def __init__(self, frame: pl.DataFrame) -> None:
         self.frame = frame
         self.calls = 0
+        self.requests: list[dict] = []
 
     async def fetch(self, data_type: DataType, symbol: str, **kwargs) -> pl.DataFrame:
         self.calls += 1
-        return self.frame.filter(pl.col("symbol") == symbol)
+        self.requests.append(dict(kwargs))
+        result = self.frame.filter(pl.col("symbol") == symbol)
+        if "date" in result.columns:
+            start = kwargs.get("start")
+            end = kwargs.get("end")
+            if start is not None:
+                result = result.filter(pl.col("date") >= start)
+            if end is not None:
+                result = result.filter(pl.col("date") <= end)
+        return result
 
     async def get_ohlcv(self, symbol, start, end, interval):
         raise NotImplementedError
@@ -107,7 +116,7 @@ async def test_data_manager_stock_and_crypto(tmp_path, stock_ohlcv, crypto_ohlcv
 
 
 @pytest.mark.asyncio
-async def test_data_manager_generic_get_uses_duckdb_first(tmp_path, stock_ohlcv):
+async def test_data_manager_generic_get_reuses_cached_or_stored_data(tmp_path, stock_ohlcv):
     duck = DuckDBStorage()
     cache = ParquetStorage(tmp_path / "cache")
     source = CountingSource(stock_ohlcv)
@@ -117,13 +126,165 @@ async def test_data_manager_generic_get_uses_duckdb_first(tmp_path, stock_ohlcv)
         storage=duck,
         cache=cache,
     )
-    first = await manager.get(DataType.OHLCV, ["AAPL"], start=date(2024, 1, 1), end=date(2024, 3, 20))
-    second = await manager.get(DataType.OHLCV, ["AAPL"], start=date(2024, 1, 1), end=date(2024, 3, 20))
-    funding = await manager.get(DataType.FUNDING_RATES, ["AAPL"], start=date(2024, 1, 1), end=date(2024, 3, 20))
+    first = await manager.get(
+        DataType.OHLCV,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 3, 20),
+    )
+    second = await manager.get(
+        DataType.OHLCV,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 3, 20),
+    )
+    funding = await manager.get(
+        DataType.FUNDING_RATES,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 3, 20),
+    )
     assert source.calls == 1
     assert duck.read("stock_prices").height == first.height
     assert second.height == first.height
     assert funding.is_empty()
+
+
+@pytest.mark.asyncio
+async def test_data_manager_uses_local_cache_before_duckdb(tmp_path, stock_ohlcv):
+    duck = DuckDBStorage()
+    cache = ParquetStorage(tmp_path / "cache")
+    source = CountingSource(stock_ohlcv)
+    manager = DataManager(
+        stock_source=source,
+        crypto_source=None,
+        storage=duck,
+        cache=cache,
+    )
+    request = {
+        "start": date(2024, 1, 1),
+        "end": date(2024, 1, 15),
+        "interval": "1d",
+    }
+    cached_frame = stock_ohlcv.filter(pl.col("date").is_between(request["start"], request["end"]))
+    cache.write(manager._cache_key(DataType.OHLCV, "AAPL", **request), cached_frame)
+
+    result = await manager.get(DataType.OHLCV, ["AAPL"], **request)
+
+    assert source.calls == 0
+    assert result.height == cached_frame.height
+    assert duck.read("stock_prices").height == cached_frame.height
+
+
+@pytest.mark.asyncio
+async def test_data_manager_uses_complete_duckdb_range_without_source(tmp_path, stock_ohlcv):
+    duck = DuckDBStorage()
+    cache = ParquetStorage(tmp_path / "cache")
+    source = CountingSource(stock_ohlcv)
+    duck.write(
+        "stock_prices",
+        stock_ohlcv.filter(pl.col("date").is_between(date(2024, 1, 1), date(2024, 1, 15))),
+    )
+    manager = DataManager(
+        stock_source=source,
+        crypto_source=None,
+        storage=duck,
+        cache=cache,
+    )
+
+    result = await manager.get(
+        DataType.OHLCV,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 1, 15),
+        interval="1d",
+    )
+
+    assert source.calls == 0
+    assert result.height == 15
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetches_only_trailing_boundary_gap(tmp_path, stock_ohlcv):
+    duck = DuckDBStorage()
+    source = CountingSource(stock_ohlcv)
+    duck.write(
+        "stock_prices",
+        stock_ohlcv.filter(pl.col("date").is_between(date(2024, 1, 1), date(2024, 1, 10))),
+    )
+    manager = DataManager(
+        stock_source=source,
+        crypto_source=None,
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    result = await manager.get(
+        DataType.OHLCV,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 1, 15),
+        interval="1d",
+    )
+
+    assert result.height == 15
+    assert source.requests == [
+        {"start": date(2024, 1, 11), "end": date(2024, 1, 15), "interval": "1d"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetches_only_leading_boundary_gap(tmp_path, stock_ohlcv):
+    duck = DuckDBStorage()
+    source = CountingSource(stock_ohlcv)
+    duck.write(
+        "stock_prices",
+        stock_ohlcv.filter(pl.col("date").is_between(date(2024, 1, 6), date(2024, 1, 15))),
+    )
+    manager = DataManager(
+        stock_source=source,
+        crypto_source=None,
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    result = await manager.get(
+        DataType.OHLCV,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 1, 15),
+        interval="1d",
+    )
+
+    assert result.height == 15
+    assert source.requests == [
+        {"start": date(2024, 1, 1), "end": date(2024, 1, 5), "interval": "1d"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetches_full_range_when_duckdb_empty(tmp_path, stock_ohlcv):
+    duck = DuckDBStorage()
+    source = CountingSource(stock_ohlcv)
+    manager = DataManager(
+        stock_source=source,
+        crypto_source=None,
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    result = await manager.get(
+        DataType.OHLCV,
+        ["AAPL"],
+        start=date(2024, 1, 1),
+        end=date(2024, 1, 15),
+        interval="1d",
+    )
+
+    assert result.height == 15
+    assert source.requests == [
+        {"start": date(2024, 1, 1), "end": date(2024, 1, 15), "interval": "1d"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -132,7 +293,9 @@ async def test_data_manager_crypto_futures_routing(tmp_path, crypto_futures_ohlc
     manager = DataManager(
         stock_source=None,
         crypto_source=None,
-        crypto_futures_source=BinanceFuturesDataSource(ohlcv_payloads={"PERP:BTC/USDT": crypto_futures_ohlcv}),
+        crypto_futures_source=BinanceFuturesDataSource(
+            ohlcv_payloads={"PERP:BTC/USDT": crypto_futures_ohlcv}
+        ),
         storage=duck,
         cache=ParquetStorage(tmp_path / "cache"),
     )
@@ -155,7 +318,12 @@ async def test_data_manager_vn_stock_routing(tmp_path, vn_stock_ohlcv):
         cache=ParquetStorage(tmp_path / "cache"),
         bundle_adapter=LocalBundleAdapter(tmp_path / "bundle"),
     )
-    data = await manager.get(DataType.OHLCV, ["VN:VNM"], start=date(2024, 1, 1), end=date(2024, 3, 20))
+    data = await manager.get(
+        DataType.OHLCV,
+        ["VN:VNM"],
+        start=date(2024, 1, 1),
+        end=date(2024, 3, 20),
+    )
     assert data.height > 0
     assert "vn_stock_prices" in duck.list_keys()
     assert not (tmp_path / "bundle" / "qts-stock-bundle").exists()

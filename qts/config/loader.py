@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -22,7 +25,6 @@ from qts.research.backtest.base import (
     StrategyConfig,
     UniverseConfig,
 )
-
 
 ALLOWED_TOP_LEVEL_KEYS = {
     "workflow",
@@ -46,6 +48,7 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "schedule",
     "promotion_gate",
 }
+BASE_CONFIG_KEY = "base_config"
 
 REQUIRED_KEYS_BY_WORKFLOW = {
     "research": {
@@ -112,22 +115,40 @@ def _normalize_backtest_engine(value: str | None) -> str:
     return aliases.get(normalized, normalized)
 
 
-def load_config(path: str | Path) -> BacktestConfig:
-    """Parse and validate YAML into a typed config."""
+def _strategy_params(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    strategy = payload.get("strategy", {})
+    if not isinstance(strategy, Mapping):
+        return {}
+    params = strategy.get("params", {})
+    return params if isinstance(params, Mapping) else {}
 
-    raw = yaml.safe_load(Path(path).read_text()) or {}
-    unknown = sorted(set(raw) - ALLOWED_TOP_LEVEL_KEYS)
+
+def _resolve_rebalance_frequency(payload: Mapping[str, Any]) -> str | int:
+    default = BacktestConfig.__dataclass_fields__["rebalance_frequency"].default
+    params = _strategy_params(payload)
+    value = params.get(
+        "rebalance_period",
+        params.get("rebalance_frequency", payload.get("rebalance_frequency", default)),
+    )
+    return value if isinstance(value, int) and not isinstance(value, bool) else str(value)
+
+
+def load_config_from_mapping(raw: Mapping[str, Any]) -> BacktestConfig:
+    """Parse and validate a mapping into a typed config."""
+
+    payload = deepcopy(dict(raw))
+    unknown = sorted(set(payload) - ALLOWED_TOP_LEVEL_KEYS)
     if unknown:
         raise ConfigError(f"Unknown top-level key(s): {', '.join(unknown)}")
-    workflow = raw.get("workflow")
+    workflow = payload.get("workflow")
     if workflow not in REQUIRED_KEYS_BY_WORKFLOW:
         raise ConfigError("workflow must be one of research, validation, live")
-    missing = sorted(REQUIRED_KEYS_BY_WORKFLOW[workflow] - set(raw))
+    missing = sorted(REQUIRED_KEYS_BY_WORKFLOW[workflow] - set(payload))
     if missing:
         raise ConfigError(f"Missing required key(s): {', '.join(missing)}")
-    universe = UniverseConfig(**raw.get("universe", {}))
-    data_sources = DataSourcesConfig(**raw.get("data_sources", {}))
-    features_payload = raw.get("features", {})
+    universe = UniverseConfig(**payload.get("universe", {}))
+    data_sources = DataSourcesConfig(**payload.get("data_sources", {}))
+    features_payload = payload.get("features", {})
     indicators = [
         IndicatorConfig(name=item["name"], params=item.get("params", {}))
         for item in features_payload.get("indicators", [])
@@ -141,36 +162,78 @@ def load_config(path: str | Path) -> BacktestConfig:
             periods=list(features_payload.get("forward_returns", {}).get("periods", []))
         ),
     )
-    commission = raw.get("commission")
+    commission = payload.get("commission")
+    initial_capital = (
+        Decimal(str(payload["initial_capital"])) if "initial_capital" in payload else None
+    )
+    train_window_default = BacktestConfig.__dataclass_fields__["train_window"].default
     return BacktestConfig(
         workflow=workflow,
-        asset_types=list(raw.get("asset_types", [])),
+        asset_types=list(payload.get("asset_types", [])),
         universe=universe,
-        start_date=_as_date(raw.get("start_date")),
-        end_date=_as_date(raw.get("end_date")),
-        initial_capital=Decimal(str(raw["initial_capital"])) if "initial_capital" in raw else None,
+        start_date=_as_date(payload.get("start_date")),
+        end_date=_as_date(payload.get("end_date")),
+        initial_capital=initial_capital,
         data_sources=data_sources,
-        storage=raw.get("storage", "duckdb"),
+        storage=payload.get("storage", "duckdb"),
         features=features_config,
-        strategy=StrategyConfig(**raw.get("strategy", {})),
-        backtest_engine=_normalize_backtest_engine(raw.get("backtest_engine")),
-        train_window=raw.get("train_window", BacktestConfig.__dataclass_fields__["train_window"].default),
-        rebalance_frequency=raw.get(
-            "rebalance_frequency",
-            BacktestConfig.__dataclass_fields__["rebalance_frequency"].default,
-        ),
-        fill_model=raw.get("fill_model"),
-        slippage_model=raw.get("slippage_model"),
+        strategy=StrategyConfig(**payload.get("strategy", {})),
+        backtest_engine=_normalize_backtest_engine(payload.get("backtest_engine")),
+        train_window=payload.get("train_window", train_window_default),
+        rebalance_frequency=_resolve_rebalance_frequency(payload),
+        fill_model=payload.get("fill_model"),
+        slippage_model=payload.get("slippage_model"),
         commission=CommissionConfig(
             model=commission["model"],
             rate=Decimal(str(commission["rate"])),
         )
         if commission
         else None,
-        calendar=raw.get("calendar"),
-        brokers=BrokersConfig(**raw["brokers"]) if "brokers" in raw else None,
-        schedule=ScheduleConfig(**raw["schedule"]) if "schedule" in raw else None,
-        promotion_gate=PromotionGateConfig(**raw["promotion_gate"])
-        if "promotion_gate" in raw
+        calendar=payload.get("calendar"),
+        brokers=BrokersConfig(**payload["brokers"]) if "brokers" in payload else None,
+        schedule=ScheduleConfig(**payload["schedule"]) if "schedule" in payload else None,
+        promotion_gate=PromotionGateConfig(**payload["promotion_gate"])
+        if "promotion_gate" in payload
         else None,
     )
+
+
+def load_config(path: str | Path) -> BacktestConfig:
+    """Parse and validate YAML into a typed config."""
+
+    return load_config_from_mapping(load_config_mapping(path))
+
+
+def load_config_mapping(path: str | Path) -> dict[str, Any]:
+    """Load YAML config inheritance into a plain mapping."""
+
+    return _load_config_mapping(Path(path))
+
+
+def _load_config_mapping(path: Path, seen: set[Path] | None = None) -> dict[str, Any]:
+    resolved = path.resolve()
+    seen = set(seen or set())
+    if resolved in seen:
+        raise ConfigError(f"Cyclic base_config reference: {resolved}")
+    seen.add(resolved)
+    payload = yaml.safe_load(resolved.read_text()) or {}
+    if not isinstance(payload, Mapping):
+        raise ConfigError(f"Expected mapping YAML: {resolved}")
+    overlay = deepcopy(dict(payload))
+    base_value = overlay.pop(BASE_CONFIG_KEY, None)
+    if base_value is None:
+        return overlay
+    base_path = Path(base_value)
+    if not base_path.is_absolute():
+        base_path = resolved.parent / base_path
+    return _deep_overlay_merge(_load_config_mapping(base_path, seen), overlay)
+
+
+def _deep_overlay_merge(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    result = deepcopy(dict(base))
+    for key, value in overlay.items():
+        if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
+            result[key] = _deep_overlay_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result

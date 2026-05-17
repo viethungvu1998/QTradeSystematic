@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
-from qts.config.loader import load_config
+from qts.config.loader import load_config, load_config_from_mapping
 from qts.core.instrument import AssetType
 from qts.core.registry import Registry
 from qts.data.bundles.local import LocalBundleAdapter
@@ -72,7 +73,14 @@ class Config:
 
     @staticmethod
     def build(path: str | Path) -> ResolvedConfig:
-        raw = load_config(path)
+        return Config._build(load_config(path))
+
+    @staticmethod
+    def build_from_mapping(raw: Mapping[str, Any]) -> ResolvedConfig:
+        return Config._build(load_config_from_mapping(raw))
+
+    @staticmethod
+    def _build(raw: BacktestConfig) -> ResolvedConfig:
         source_components = _build_component_fields(
             raw.data_sources,
             suffix="source",
@@ -82,7 +90,7 @@ class Config:
         cache = _build_storage("parquet", role="cache")
         bundle_adapter = LocalBundleAdapter(root=bundle_dir())
         feature_pipeline = FeaturePipeline(_resolve_features(raw))
-        strategy = Registry.get_strategy(raw.strategy.type)(**raw.strategy.params)
+        strategy = _build_strategy(raw)
         engine = Registry.get_engine(raw.backtest_engine)()
         fill_model = Registry.get_fill_model(raw.fill_model)() if raw.fill_model else None
         slippage_model = (
@@ -114,6 +122,13 @@ class Config:
             calendar=calendar,
             **broker_components,
         )
+
+
+def _build_strategy(raw: BacktestConfig) -> object:
+    strategy_cls = Registry.get_strategy(raw.strategy.type)
+    if hasattr(strategy_cls, "from_config_params"):
+        return strategy_cls.from_config_params(raw.strategy.params)
+    return strategy_cls(**raw.strategy.params)
 
 
 def _build_component_fields(

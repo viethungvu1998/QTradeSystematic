@@ -7,8 +7,7 @@ from typing import Any, ClassVar
 
 from qts.core.errors import RegistryError
 
-
-RegistryDict = dict[str, type[Any]]
+RegistryDict = dict[str, Any]
 
 
 class Registry:
@@ -24,17 +23,19 @@ class Registry:
     _slippage_models: ClassVar[RegistryDict] = {}
     _commission_models: ClassVar[RegistryDict] = {}
     _calendars: ClassVar[RegistryDict] = {}
+    _factor_trainers: ClassVar[RegistryDict] = {}
+    _portfolio_constructors: ClassVar[RegistryDict] = {}
 
     @classmethod
-    def _register(cls, registry: RegistryDict, name: str) -> Callable[[type[Any]], type[Any]]:
-        def decorator(target: type[Any]) -> type[Any]:
+    def _register(cls, registry: RegistryDict, name: str) -> Callable[[Any], Any]:
+        def decorator(target: Any) -> Any:
             registry[name] = target
             return target
 
         return decorator
 
     @classmethod
-    def _get(cls, registry: RegistryDict, name: str, kind: str) -> type[Any]:
+    def _get(cls, registry: RegistryDict, name: str, kind: str) -> Any:
         try:
             return registry[name]
         except KeyError as exc:
@@ -119,3 +120,19 @@ class Registry:
     @classmethod
     def get_calendar(cls, name: str) -> type[Any]:
         return cls._get(cls._calendars, name, "calendar")
+
+    @classmethod
+    def register_factor_trainer(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._factor_trainers, name)
+
+    @classmethod
+    def get_factor_trainer(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._factor_trainers, name, "factor trainer")
+
+    @classmethod
+    def register_portfolio_constructor(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._portfolio_constructors, name)
+
+    @classmethod
+    def get_portfolio_constructor(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._portfolio_constructors, name, "portfolio constructor")

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 try:  # pragma: no cover - exercised when Prefect is installed
-    from prefect import flow, task
+    from prefect import deploy, flow, task
     try:
         from prefect.runner import serve
     except ImportError:
@@ -40,4 +40,7 @@ except ModuleNotFoundError:  # pragma: no cover - simple compatibility path
         return decorator
 
     def serve(*deployments):
+        return deployments
+
+    def deploy(*deployments, **kwargs):
         return deployments

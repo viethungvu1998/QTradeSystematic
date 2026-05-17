@@ -1,0 +1,28 @@
+base_config: ../base.yaml
+tracking:
+  enabled: false
+  experiment_name: qts-stat-arb
+  run_name: stat-arb-zscore-sweep
+storage:
+  root: runs/stat-arb-zscore
+sweep:
+  mode: optuna
+  n_trials: 24
+  study_name: stat-arb-zscore
+  sampler:
+    name: tpe
+    seed: 42
+  objective:
+    metric: sharpe
+    direction: maximize
+  search_space:
+    - path: strategy.params.entry_zscore
+      type: float
+      low: 1.0
+      high: 3.0
+      step: 0.25
+    - path: strategy.params.zscore_window
+      type: int
+      low: 14
+      high: 60
+      step: 2

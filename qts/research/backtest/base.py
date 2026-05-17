@@ -120,7 +120,7 @@ class BacktestConfig:
     strategy: StrategyConfig = field(default_factory=lambda: StrategyConfig(type="factor"))
     backtest_engine: str = "vectorbt"
     train_window: int = 252
-    rebalance_frequency: str = "monthly"
+    rebalance_frequency: str | int = "monthly"
     fill_model: str | None = None
     slippage_model: str | None = None
     commission: CommissionConfig | None = None

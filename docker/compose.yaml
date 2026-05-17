@@ -1,0 +1,150 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: qts
+      POSTGRES_PASSWORD: qts
+      POSTGRES_DB: qts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qts"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  prefect-server:
+    image: qts-app:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app
+    command: prefect server start --host 0.0.0.0 --no-services
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://qts:qts@postgres:5432/prefect
+      PREFECT_MESSAGING_BROKER: prefect_redis.messaging
+      PREFECT_MESSAGING_CACHE: prefect_redis.messaging
+      PREFECT_REDIS_MESSAGING_HOST: redis
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    ports:
+      - "127.0.0.1:4200:4200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4200/api/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  prefect-services:
+    image: qts-app:local
+    command: prefect server services start
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://qts:qts@postgres:5432/prefect
+      PREFECT_MESSAGING_BROKER: prefect_redis.messaging
+      PREFECT_MESSAGING_CACHE: prefect_redis.messaging
+      PREFECT_REDIS_MESSAGING_HOST: redis
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+
+  mlflow:
+    image: qts-app:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts 127.0.0.1,127.0.0.1:5001,localhost,localhost:5001,mlflow,mlflow:5000
+      --backend-store-uri postgresql+psycopg2://qts:qts@postgres:5432/mlflow
+      --serve-artifacts
+      --artifacts-destination /mlflow/artifacts
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  qts-worker:
+    image: qts-app:local
+    command: prefect worker start --pool qts-process-pool --type process
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      QTS_ROOT: /var/lib/qts
+      FMP_API_KEY: ${FMP_API_KEY:-CHANGE_ME}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-CHANGE_ME}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-CHANGE_ME}
+      DNSE_USERNAME: ${DNSE_USERNAME:-CHANGE_ME}
+      DNSE_PASSWORD: ${DNSE_PASSWORD:-CHANGE_ME}
+    volumes:
+      - qts_data:/var/lib/qts
+    depends_on:
+      qts-bootstrap:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_healthy
+
+  qts-bootstrap:
+    image: qts-app:local
+    command: >
+      bash -lc '
+      until curl -fsS http://prefect-server:4200/api/health >/dev/null; do sleep 2; done;
+      prefect work-pool inspect qts-process-pool >/dev/null 2>&1
+      || prefect work-pool create qts-process-pool --type process;
+      python -m qts.orchestration.deployments configs/deployments/local.yaml
+      '
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+
+  qts-shell:
+    image: qts-app:local
+    profiles: ["shell"]
+    command: bash
+    stdin_open: true
+    tty: true
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      QTS_ROOT: /var/lib/qts
+      FMP_API_KEY: ${FMP_API_KEY:-CHANGE_ME}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-CHANGE_ME}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-CHANGE_ME}
+      DNSE_USERNAME: ${DNSE_USERNAME:-CHANGE_ME}
+      DNSE_PASSWORD: ${DNSE_PASSWORD:-CHANGE_ME}
+    volumes:
+      - qts_data:/var/lib/qts
+
+volumes:
+  postgres_data:
+  redis_data:
+  mlflow_artifacts:
+  qts_data:

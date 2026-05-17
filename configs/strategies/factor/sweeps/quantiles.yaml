@@ -1,0 +1,28 @@
+base_config: ../base.yaml
+tracking:
+  enabled: false
+  experiment_name: qts-factor
+  run_name: factor-quantile-sweep
+storage:
+  root: runs/factor-quantiles
+sweep:
+  mode: optuna
+  n_trials: 30
+  study_name: factor-quantiles
+  sampler:
+    name: tpe
+    seed: 42
+  objective:
+    metric: sharpe
+    direction: maximize
+  search_space:
+    - path: strategy.params.long_quantile
+      type: float
+      low: 0.6
+      high: 0.95
+      step: 0.05
+    - path: strategy.params.short_quantile
+      type: float
+      low: 0.05
+      high: 0.4
+      step: 0.05

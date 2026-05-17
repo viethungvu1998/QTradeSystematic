@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 
 import polars as pl
 
@@ -94,11 +94,6 @@ class DataManager:
             return pl.DataFrame()
 
         table = self._table_name(asset_type, data_type)
-        if self.storage.exists(table):
-            existing = self._db_lookup(table, symbol, data_type, **kwargs)
-            if existing.height > 0:
-                return self._sort_frame(existing, data_type)
-
         cache_key = self._cache_key(data_type, symbol, **kwargs)
         if self.cache is not None and self.cache.exists(cache_key):
             cached = self._sort_frame(self.cache.read(cache_key), data_type)
@@ -106,12 +101,103 @@ class DataManager:
                 self.storage.append(table, cached)
                 return cached
 
-        frame = self._sort_frame(await source.fetch(data_type, symbol, **kwargs), data_type)
-        if frame.height > 0:
-            if self.cache is not None:
-                self.cache.write(cache_key, frame)
-            self.storage.append(table, frame)
-        return frame
+        if self.storage.exists(table):
+            existing = self._sort_frame(
+                self._db_lookup(table, symbol, data_type, **kwargs),
+                data_type,
+            )
+            if existing.height > 0:
+                if TIME_COLUMN[data_type] is None:
+                    return existing
+                missing_ranges = self._missing_boundary_ranges(existing, data_type, kwargs)
+                if not missing_ranges:
+                    return existing
+                return await self._fetch_store_and_reload(
+                    source,
+                    table,
+                    data_type,
+                    symbol,
+                    missing_ranges,
+                    kwargs,
+                )
+
+        return await self._fetch_store_and_reload(
+            source,
+            table,
+            data_type,
+            symbol,
+            [dict(kwargs)],
+            kwargs,
+            cache_key=cache_key,
+        )
+
+    def _requested_time_bounds(
+        self,
+        data_type: DataType,
+        kwargs: dict,
+    ) -> tuple[str | None, object | None, object | None]:
+        time_column = TIME_COLUMN[data_type]
+        if time_column is None:
+            return None, None, None
+        return time_column, kwargs.get("start"), kwargs.get("end")
+
+    def _missing_boundary_ranges(
+        self,
+        existing: pl.DataFrame,
+        data_type: DataType,
+        kwargs: dict,
+    ) -> list[dict]:
+        time_column, start, end = self._requested_time_bounds(data_type, kwargs)
+        if time_column is None or time_column not in existing.columns:
+            return []
+
+        ranges: list[dict] = []
+        min_existing = existing[time_column].min()
+        max_existing = existing[time_column].max()
+        if start is not None and min_existing is not None and min_existing > start:
+            leading = dict(kwargs)
+            leading["start"] = start
+            leading["end"] = min_existing - timedelta(days=1)
+            ranges.append(leading)
+        if end is not None and max_existing is not None and max_existing < end:
+            trailing = dict(kwargs)
+            trailing["start"] = max_existing + timedelta(days=1)
+            trailing["end"] = end
+            ranges.append(trailing)
+        return ranges
+
+    async def _fetch_store_and_reload(
+        self,
+        source: BaseDataSource,
+        table: str,
+        data_type: DataType,
+        symbol: str,
+        ranges: list[dict],
+        requested_kwargs: dict,
+        *,
+        cache_key: str | None = None,
+    ) -> pl.DataFrame:
+        fetched_frames = [
+            self._sort_frame(await source.fetch(data_type, symbol, **range_kwargs), data_type)
+            for range_kwargs in ranges
+        ]
+        nonempty = [frame for frame in fetched_frames if frame.height > 0]
+        if nonempty:
+            fetched = self._sort_frame(pl.concat(nonempty, how="vertical"), data_type)
+            self.storage.append(table, fetched)
+            if cache_key is not None and self.cache is not None:
+                self.cache.write(cache_key, fetched)
+
+        if self.storage.exists(table):
+            stored = self._sort_frame(
+                self._db_lookup(table, symbol, data_type, **requested_kwargs),
+                data_type,
+            )
+            if stored.height > 0:
+                return stored
+        if not nonempty:
+            return pl.DataFrame()
+        return fetched
 
     def _db_lookup(self, table: str, symbol: str, data_type: DataType, **kwargs) -> pl.DataFrame:
         conditions = [f"symbol = '{symbol}'"]
