@@ -77,7 +77,7 @@ from qts.research.features.preprocessor import (
     remove_flagged_symbols,
 )
 from qts.research.strategies.base import BaseStrategy
-from qts.research.strategies.factor.portfolio_construction import (
+from qts.research.portfolio_construction import (
     long_short_equal_weight_portfolio,
 )
 from qts.research.strategies.ml_factor.model import train_and_predict_xgb_classifier

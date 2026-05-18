@@ -1,0 +1,97 @@
+version: 1
+algorithm: vn100_quantamental
+description: >
+  VN100 quantamental ML strategy — QSMOM + fundamental factors, XGBoost regressor.
+  Universe: ~100 VN equities. Long-only walk-forward backtest.
+
+command:
+  # Path relative to project root
+  module: notebooks/vn100_quantamental_mlflow.py
+  # Base args added to every trial invocation
+  base_args:
+    - --no-mlflow
+    - --no-fetch-fundamentals
+    - --max-symbols=30
+
+paths:
+  # Relative to project root
+  ledger: configs/strategies/vn100_quantamental/autoresearch/ledger
+  allowed_edit_roots:
+    - configs/strategies/ml_factor/
+    - configs/strategies/vn100_quantamental/
+
+quota:
+  max_trials: 20
+
+criteria:
+  # Loop stops (criteria_met) when ALL conditions are satisfied
+  sharpe_ge: 0.8
+  max_drawdown_le: 0.25
+
+research_limits:
+  allowed_actions:
+    - tune_hyperparams
+    - change_rebalance_period
+    - change_portfolio_params
+    - change_feature_config
+
+# Ordered list of experiments to try before generating new ones
+first_experiments:
+  - name: long_window_504
+    action: tune_hyperparams
+    args:
+      - --train-window=504
+
+  - name: rebalance_10d
+    action: change_rebalance_period
+    args:
+      - --rebalance-period=10
+
+  - name: more_positions_12
+    action: change_portfolio_params
+    args:
+      - --num-long-positions=12
+
+  - name: fewer_positions_5
+    action: change_portfolio_params
+    args:
+      - --num-long-positions=5
+
+  - name: xgb_deeper_100
+    action: tune_hyperparams
+    args:
+      - --model-max-depth=5
+      - --model-n-estimators=100
+
+  - name: qsmom_medium_window
+    action: change_feature_config
+    args:
+      - --qsmom-fast=42
+      - --qsmom-slow=126
+
+  - name: forward_period_10
+    action: tune_hyperparams
+    args:
+      - --forward-period=10
+
+  - name: short_window_252
+    action: tune_hyperparams
+    args:
+      - --train-window=252
+
+  - name: rebalance_21d
+    action: change_rebalance_period
+    args:
+      - --rebalance-period=21
+
+  - name: xgb_shallow_50
+    action: tune_hyperparams
+    args:
+      - --model-max-depth=2
+      - --model-n-estimators=50
+
+  - name: optuna_sweep
+    action: sweep_hyperparams
+    sweep_config: configs/strategies/ml_factor/sweeps/vn100_quantamental.yaml
+    args:
+      - --run-sweeps

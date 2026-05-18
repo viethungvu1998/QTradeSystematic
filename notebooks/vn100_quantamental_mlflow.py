@@ -12,16 +12,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib.util
-import math
 import os
 import sys
 import threading
-import warnings
-from copy import deepcopy
-from dataclasses import asdict, dataclass, is_dataclass
-from datetime import date, datetime, timedelta
+from dataclasses import asdict
+from datetime import date, datetime
 from decimal import Decimal
-from itertools import product
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -42,46 +38,30 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 os.environ.setdefault("QTS_ROOT", str(PROJECT_ROOT / ".qts_notebook_runtime"))
+
+import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 import pandas as pd
 import polars as pl
 import yaml
 
-import qts  # noqa: F401 - import registry side effects
-from qts.data.manager import DataManager
-from qts.data.sources.vnstock import VnstockDataSource
-from qts.data.storage.duckdb import DuckDBStorage
-from qts.data.storage.parquet import ParquetStorage
-from qts.research.backtest._runner import _rebalance_dates, run_backtest_frame
-from qts.research.backtest.base import (
-    BacktestConfig,
-    BacktestResult,
-    CommissionConfig,
-    UniverseConfig,
+import qts  # noqa: F401 — registry side effects
+from qts.research.backtest.base import BacktestResult
+from qts.research.strategies.vn100_quantamental import (
+    ExperimentConfig,
+    FeatureConfig,
+    MODEL_PARAMS,
+    VN100QuantamentalStrategy,
+    build_model_frame,
+    feature_coverage_report,
+    fetch_prices_and_fundamentals,
+    fundamental_cache_report,
+    load_vn100_symbols,
+    make_sweep_arms,
+    walk_forward_ml_signals,
+    choose_predictors,
 )
-from qts.research.features.forward_returns import ForwardReturns
-from qts.research.features.fundamentals import (
-    FUNDAMENTAL_FACTOR_GROUPS,
-    VNFundamentalFeatures,
-)
-from qts.research.features.fundamentals import (
-    add_factor_scores as add_fundamental_factor_scores,
-)
-from qts.research.features.indicators.momentum import ROCFeature, RSIFeature
-from qts.research.features.indicators.trend import MACDFeature
-from qts.research.features.indicators.volatility import ATRFeature, HistVolFeature
-from qts.research.features.preprocessor import (
-    flag_anomalies,
-    preprocess_ohlcv,
-    remove_flagged_symbols,
-)
-from qts.research.strategies.base import BaseStrategy
-from qts.research.strategies.factor.algorithms import train_and_predict_xgb_regressor
-from qts.research.strategies.factor.portfolio_construction import (
-    long_short_equal_weight_portfolio,
-)
-from qts.utils.paths import cache_dir
 
 MLFLOW_AVAILABLE = importlib.util.find_spec("mlflow") is not None
 if MLFLOW_AVAILABLE:
@@ -97,6 +77,10 @@ DEFAULT_STRATEGY_CONFIG = PROJECT_ROOT / "configs" / "strategies" / "ml_factor" 
 DEFAULT_MLFLOW_TRACKING_URI = "http://127.0.0.1:5001"
 DEFAULT_MLFLOW_EXPERIMENT_NAME = "VN100 Quantamental ML"
 
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 def env_int(name: str, default: int | None = None) -> int | None:
     value = os.environ.get(name)
@@ -152,12 +136,6 @@ def run_async(coro):
     return result["value"]
 
 
-def normalize_vn_symbol(symbol: str, prefix: str = "VN:") -> str:
-    raw = str(symbol).strip().upper()
-    normalized_prefix = prefix.upper()
-    return raw if raw.startswith(normalized_prefix) else f"{normalized_prefix}{raw}"
-
-
 def load_yaml_mapping(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -167,604 +145,36 @@ def load_yaml_mapping(path: Path) -> dict[str, Any]:
     return payload
 
 
-def load_vn100_symbols(path: Path, max_symbols: int | None) -> tuple[list[str], str]:
-    config = load_yaml_mapping(path)
-    symbols = config.get("symbols") or []
-    if not isinstance(symbols, list) or not symbols:
-        raise ValueError(f"{path} must define a non-empty symbols list")
-    prefix = str(config.get("symbol_prefix", "VN:"))
-    normalized = [normalize_vn_symbol(item, prefix=prefix) for item in symbols]
-    normalized = list(dict.fromkeys(normalized))
-    benchmark = normalize_vn_symbol(config.get("benchmark_symbol", "VN100"), prefix=prefix)
-    if max_symbols is not None:
-        normalized = normalized[:max_symbols]
-    return normalized, benchmark
-
-
-def make_vn_manager(runtime_root: Path) -> DataManager:
-    storage = DuckDBStorage(database=str(runtime_root / "vn100.duckdb"))
-    cache = ParquetStorage(root=runtime_root / "cache")
-    return DataManager(
-        stock_source=None,
-        crypto_source=None,
-        vn_stock_source=VnstockDataSource.from_env(),
-        storage=storage,
-        cache=cache,
-        bundle_adapter=None,
-    )
-
-
-async def fetch_ohlcv_resilient(
-    manager: DataManager,
-    symbols: list[str],
-    start_date: date,
-    end_date: date,
-    interval: str,
-    batch_size: int,
-) -> tuple[pl.DataFrame, list[tuple[str, str]]]:
-    frames: list[pl.DataFrame] = []
-    failures: list[tuple[str, str]] = []
-    for start_idx in range(0, len(symbols), batch_size):
-        batch = symbols[start_idx : start_idx + batch_size]
-        try:
-            frame = await manager.get_ohlcv(batch, start_date, end_date, interval=interval)
-            if not frame.is_empty():
-                frames.append(frame)
-            continue
-        except Exception as exc:
-            print(f"Batch failed, retrying symbol-by-symbol: {batch} ({exc})")
-
-        for symbol in batch:
-            try:
-                frame = await manager.get_ohlcv([symbol], start_date, end_date, interval=interval)
-                if not frame.is_empty():
-                    frames.append(frame)
-            except Exception as exc:
-                failures.append((symbol, str(exc)))
-
-    if not frames:
-        return pl.DataFrame(), failures
-    combined = pl.concat(frames, how="vertical").unique(subset=["date", "symbol"], keep="last")
-    return combined.sort(["symbol", "date"]), failures
-
-
-async def fetch_prices_and_fundamentals(
-    symbols: list[str],
-    benchmark_symbol: str,
-    runtime_root: Path,
-    *,
-    start_date: date,
-    end_date: date,
-    interval: str,
-    batch_size: int,
-    fetch_fundamentals: bool,
-    fundamental_termtype: int,
-    fundamental_pages: int,
-    force_refresh_fundamentals: bool,
-) -> tuple[pl.DataFrame, pl.DataFrame, list[tuple[str, str]]]:
-    manager = make_vn_manager(runtime_root)
-    ohlcv_all, failures = await fetch_ohlcv_resilient(
-        manager,
-        symbols,
-        start_date,
-        end_date,
-        interval,
-        batch_size,
-    )
-    equity_symbols = [symbol for symbol in symbols if symbol != benchmark_symbol]
-    if fetch_fundamentals:
-        await manager.bulk_fetch_vn_fundamentals(
-            equity_symbols,
-            termtype=fundamental_termtype,
-            pages=fundamental_pages,
-            force_refresh=force_refresh_fundamentals,
-        )
-    benchmark = ohlcv_all.filter(pl.col("symbol") == benchmark_symbol)
-    ohlcv = ohlcv_all.filter(pl.col("symbol") != benchmark_symbol)
-    return ohlcv.sort(["symbol", "date"]), benchmark.sort(["symbol", "date"]), failures
-
-
-@dataclass(frozen=True)
-class FeatureConfig:
-    min_trading_days: int = 252
-    volume_top_n: int | None = 80
-    min_avg_volume: float = 50_000
-    remove_large_gaps: bool = False
-    max_gap_days: int = 21
-    remove_low_volume: bool = False
-    qsmom_fast: int = 21
-    qsmom_slow: int = 252
-    qsmom_returns: int = 126
-    forward_period: int = 21
-    fundamental_termtype: int = 1
-
-
-@dataclass(frozen=True)
-class ExperimentConfig:
-    name: str
-    feature: FeatureConfig
-    predictor_cols: list[str] | None = None
-    train_window: int = 504
-    rebalance_period: str = "monthly"
-    num_long_positions: int = 10
-    num_short_positions: int = 0
-    long_threshold: float | None = None
-    short_threshold: float | None = None
-    model_params: dict[str, Any] | None = None
-    initial_capital: Decimal = Decimal("1000000000")
-
-
-TECHNICAL_BASE_COLUMNS = [
-    "roc_21",
-    "roc_63",
-    "roc_126",
-    "roc_252",
-    "rsi_14",
-    "rsi_63",
-    "macd_line",
-    "macd_signal",
-    "macd_hist",
-    "atr_14",
-    "hist_vol_21",
-    "hist_vol_63",
-    "hist_vol_126",
-    "close_to_sma_50",
-    "close_to_sma_200",
-    "volume_ratio_20",
-    "dollar_volume_zscore_63",
-    "intraday_range",
-    "close_location_value",
-]
-
-MODEL_PARAMS = {
-    "random_state": 123,
-    "objective": "reg:squarederror",
-    "n_estimators": 120,
-    "max_depth": 3,
-    "learning_rate": 0.05,
-    "subsample": 0.85,
-    "colsample_bytree": 0.85,
-    "n_jobs": -1,
-}
-
-
-def qsmom_column(config: FeatureConfig) -> str:
-    return f"close_qsmom_{config.qsmom_fast}_{config.qsmom_slow}_{config.qsmom_returns}"
-
-
-def technical_columns(config: FeatureConfig) -> list[str]:
-    return [qsmom_column(config), *TECHNICAL_BASE_COLUMNS]
-
-
-def default_predictor_candidates(config: FeatureConfig) -> list[str]:
-    return [
-        qsmom_column(config),
-        "technicalCompositeFactor",
-        "fundamentalCompositeFactor",
-        "hybridCompositeFactor",
-        *FUNDAMENTAL_FACTOR_GROUPS.keys(),
-        "roc_63",
-        "roc_252",
-        "rsi_63",
-        "macd_hist",
-        "hist_vol_63",
-        "hist_vol_126",
-        "close_to_sma_50",
-        "close_to_sma_200",
-        "volume_ratio_20",
-        "dollar_volume_zscore_63",
-    ]
-
-
-def available_predictors(df: pl.DataFrame, candidates: list[str]) -> list[str]:
-    return [
-        col
-        for col in candidates
-        if col in df.columns and df.select(pl.col(col).is_not_null().sum()).item() > 0
-    ]
-
-
-def effective_long_threshold(value: float | None) -> float:
-    return -math.inf if value is None else float(value)
-
-
-def screen_liquid_universe(df: pl.DataFrame, config: FeatureConfig) -> pl.DataFrame:
-    if config.volume_top_n is None:
-        return df
-    latest_date = df["date"].max()
-    lookback_start = latest_date - timedelta(days=365)
-    liquidity = (
-        df.filter(pl.col("date") >= lookback_start)
-        .group_by("symbol")
+def summarize_ohlcv(ohlcv: pl.DataFrame) -> pl.DataFrame:
+    return (
+        ohlcv.group_by("symbol")
         .agg(
-            pl.col("volume").mean().alias("avg_volume"),
+            pl.col("date").min().alias("start"),
+            pl.col("date").max().alias("end"),
             pl.len().alias("rows"),
             pl.col("close").last().alias("last_close"),
+            pl.col("volume").mean().alias("avg_volume"),
         )
-        .filter((pl.col("avg_volume") >= config.min_avg_volume) & (pl.col("rows") >= 120))
-        .sort("avg_volume", descending=True)
-        .head(config.volume_top_n)
-    )
-    return df.filter(pl.col("symbol").is_in(liquidity["symbol"].to_list()))
-
-
-def add_qsmom_features(df: pl.DataFrame, config: FeatureConfig) -> pl.DataFrame:
-    fast = config.qsmom_fast
-    slow = config.qsmom_slow
-    returns = config.qsmom_returns
-    out_col = qsmom_column(config)
-    return (
-        df.sort(["symbol", "date"])
-        .with_columns(
-            ((pl.col("close") / pl.col("close").shift(1).over("symbol")) - 1).alias(
-                "_daily_return"
-            ),
-            (
-                (
-                    pl.col("close").shift(fast).over("symbol")
-                    / pl.col("close").shift(slow).over("symbol")
-                )
-                - 1
-            ).alias("_older_momentum"),
-            ((pl.col("close") / pl.col("close").shift(fast).over("symbol")) - 1).alias(
-                "_recent_momentum"
-            ),
-        )
-        .with_columns(
-            pl.col("_daily_return")
-            .rolling_std(window_size=returns, min_samples=returns)
-            .over("symbol")
-            .alias("_return_vol")
-        )
-        .with_columns(
-            (
-                (pl.col("_older_momentum") - pl.col("_recent_momentum"))
-                / (pl.col("_return_vol") + 1e-8)
-            ).alias(out_col)
-        )
-        .drop(["_daily_return", "_older_momentum", "_recent_momentum", "_return_vol"])
+        .sort("rows", descending=True)
     )
 
 
-def add_price_action_features(df: pl.DataFrame) -> pl.DataFrame:
-    return (
-        df.sort(["symbol", "date"])
-        .with_columns(
-            pl.col("close").rolling_mean(20, min_samples=20).over("symbol").alias("sma_20"),
-            pl.col("close").rolling_mean(50, min_samples=50).over("symbol").alias("sma_50"),
-            pl.col("close").rolling_mean(200, min_samples=200).over("symbol").alias("sma_200"),
-            pl.col("volume").rolling_mean(20, min_samples=20).over("symbol").alias("volume_sma_20"),
-            (pl.col("close") * pl.col("volume")).alias("dollar_volume"),
-            ((pl.col("high") - pl.col("low")) / (pl.col("close") + 1e-8)).alias("intraday_range"),
-            ((pl.col("close") - pl.col("low")) / (pl.col("high") - pl.col("low") + 1e-8)).alias(
-                "close_location_value"
-            ),
-        )
-        .with_columns(
-            ((pl.col("close") / (pl.col("sma_50") + 1e-8)) - 1).alias("close_to_sma_50"),
-            ((pl.col("close") / (pl.col("sma_200") + 1e-8)) - 1).alias("close_to_sma_200"),
-            (pl.col("volume") / (pl.col("volume_sma_20") + 1e-8)).alias("volume_ratio_20"),
-            (
-                (
-                    pl.col("dollar_volume")
-                    - pl.col("dollar_volume").rolling_mean(63, min_samples=63).over("symbol")
-                )
-                / (pl.col("dollar_volume").rolling_std(63, min_samples=63).over("symbol") + 1e-8)
-            ).alias("dollar_volume_zscore_63"),
-        )
-    )
+def serializable(value: Any) -> Any:
+    from dataclasses import is_dataclass
+    if is_dataclass(value):
+        return serializable(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): serializable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [serializable(item) for item in value]
+    if isinstance(value, date | datetime | Decimal | Path):
+        return str(value)
+    return value
 
 
-def add_technical_features(df: pl.DataFrame) -> pl.DataFrame:
-    result = df
-    for feature in [
-        ROCFeature(periods=[21, 63, 126, 252]),
-        RSIFeature(periods=[14, 63]),
-        MACDFeature(fast=50, slow=200, signal=30),
-        ATRFeature(periods=[14]),
-        HistVolFeature(periods=[21, 63, 126]),
-    ]:
-        result = feature.fit_transform(result)
-    return add_price_action_features(result)
-
-
-def _zscore_expr(column: str) -> pl.Expr:
-    return (
-        (
-            (pl.col(column) - pl.col(column).mean().over("date"))
-            / (pl.col(column).std().over("date") + 1e-8)
-        )
-        .fill_nan(None)
-        .fill_null(0.0)
-    )
-
-
-def add_factor_scores(
-    df: pl.DataFrame, config: FeatureConfig
-) -> tuple[pl.DataFrame, dict[str, list[str]]]:
-    result = df
-    used: dict[str, list[str]] = {}
-
-    tech_cols = [col for col in technical_columns(config) if col in result.columns]
-    if tech_cols:
-        result = result.with_columns(
-            (sum(_zscore_expr(col) for col in tech_cols) / len(tech_cols)).alias(
-                "technicalCompositeFactor"
-            )
-        )
-        used["technicalCompositeFactor"] = tech_cols
-
-    result, fundamental_sources = add_fundamental_factor_scores(result)
-    used.update(fundamental_sources)
-
-    hybrid_inputs = [
-        col
-        for col in ["technicalCompositeFactor", "fundamentalCompositeFactor"]
-        if col in result.columns
-    ]
-    if hybrid_inputs:
-        result = result.with_columns(
-            (sum(pl.col(col) for col in hybrid_inputs) / len(hybrid_inputs)).alias(
-                "hybridCompositeFactor"
-            )
-        )
-        used["hybridCompositeFactor"] = hybrid_inputs
-
-    return result, used
-
-
-def _stage_row(
-    name: str, frame: pl.DataFrame, previous: pl.DataFrame | None = None
-) -> dict[str, Any]:
-    symbols = frame.select("symbol").n_unique() if "symbol" in frame.columns and frame.height else 0
-    previous_symbols = (
-        previous.select("symbol").n_unique()
-        if previous is not None and "symbol" in previous.columns and previous.height
-        else None
-    )
-    return {
-        "stage": name,
-        "rows": frame.height,
-        "symbols": symbols,
-        "columns": len(frame.columns),
-        "rows_delta": None if previous is None else frame.height - previous.height,
-        "symbols_delta": None if previous_symbols is None else symbols - previous_symbols,
-    }
-
-
-def build_model_frame(
-    raw_ohlcv: pl.DataFrame,
-    config: FeatureConfig,
-    *,
-    return_diagnostics: bool = False,
-) -> (
-    tuple[pl.DataFrame, dict[str, list[str]]]
-    | tuple[pl.DataFrame, dict[str, list[str]], pl.DataFrame]
-):
-    diagnostics: list[dict[str, Any]] = [_stage_row("raw", raw_ohlcv)]
-
-    screened = screen_liquid_universe(raw_ohlcv, config)
-    diagnostics.append(_stage_row("liquidity_screen", screened, raw_ohlcv))
-
-    cleaned = preprocess_ohlcv(screened, min_trading_days=config.min_trading_days)
-    diagnostics.append(_stage_row("preprocess_ohlcv", cleaned, screened))
-
-    flagged = flag_anomalies(cleaned, max_gap_days=config.max_gap_days, min_notional_usd=None)
-    diagnostics.append(_stage_row("flag_anomalies", flagged, cleaned))
-
-    cleaned = remove_flagged_symbols(
-        flagged,
-        remove_large_gaps=config.remove_large_gaps,
-        remove_low_volume=config.remove_low_volume,
-    )
-    diagnostics.append(_stage_row("remove_flagged_symbols", cleaned, flagged))
-
-    featured = add_qsmom_features(cleaned, config)
-    diagnostics.append(_stage_row("qsmom", featured, cleaned))
-
-    featured = add_technical_features(featured)
-    diagnostics.append(_stage_row("technical_features", featured))
-
-    featured = VNFundamentalFeatures(termtype=config.fundamental_termtype).fit_transform(featured)
-    diagnostics.append(_stage_row("fundamental_features", featured))
-
-    featured, factor_sources = add_factor_scores(featured, config)
-    diagnostics.append(_stage_row("factor_scores", featured))
-
-    featured = ForwardReturns(periods=[config.forward_period]).fit_transform(featured)
-    diagnostics.append(_stage_row("forward_returns", featured))
-
-    result = featured.sort(["symbol", "date"])
-    diagnostic_frame = pl.DataFrame(diagnostics)
-    if return_diagnostics:
-        return result, factor_sources, diagnostic_frame
-    return result, factor_sources
-
-
-def feature_coverage_report(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
-    rows = []
-    total = max(df.height, 1)
-    for column in columns:
-        if column not in df.columns:
-            rows.append(
-                {
-                    "column": column,
-                    "present": False,
-                    "dtype": None,
-                    "non_null": 0,
-                    "null_pct": 1.0,
-                    "finite_pct": 0.0,
-                    "n_unique": 0,
-                }
-            )
-            continue
-        series = df[column]
-        non_null = total - series.null_count()
-        finite = (
-            df.select(pl.col(column).is_finite().sum()).item()
-            if series.dtype.is_numeric()
-            else non_null
-        )
-        rows.append(
-            {
-                "column": column,
-                "present": True,
-                "dtype": str(series.dtype),
-                "non_null": int(non_null),
-                "null_pct": float(series.null_count() / total),
-                "finite_pct": float(finite / total),
-                "n_unique": int(series.n_unique()),
-            }
-        )
-    return pl.DataFrame(rows)
-
-
-def fundamental_cache_report(symbols: list[str], termtype: int = 1) -> pl.DataFrame:
-    label = "annual" if termtype == 1 else "quarterly"
-    rows = []
-    for symbol in symbols:
-        ticker = symbol.split(":", 1)[1] if ":" in symbol else symbol
-        path = cache_dir() / "vn_fundamentals" / f"{ticker}_{label}.parquet"
-        rows.append(
-            {
-                "symbol": symbol,
-                "cached": path.exists(),
-                "path": str(path),
-                "rows": pl.read_parquet(path).height if path.exists() else 0,
-            }
-        )
-    return pl.DataFrame(rows)
-
-
-class EmptyStrategy(BaseStrategy):
-    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
-        return self.empty_signal_frame()
-
-
-def choose_predictors(
-    df: pl.DataFrame,
-    config: FeatureConfig,
-    explicit_cols: list[str] | None = None,
-) -> list[str]:
-    candidates = explicit_cols or default_predictor_candidates(config)
-    return available_predictors(df, candidates)
-
-
-def signals_from_weights(trade_date: date, weights: dict[str, float]) -> pl.DataFrame:
-    rows = [
-        {
-            "date": trade_date,
-            "symbol": symbol,
-            "signal": 1 if weight > 0 else -1,
-            "weight": abs(float(weight)),
-        }
-        for symbol, weight in weights.items()
-        if float(weight) != 0.0
-    ]
-    if not rows:
-        return BaseStrategy.empty_signal_frame()
-    return EmptyStrategy().validate_signal_frame(pl.DataFrame(rows))
-
-
-def walk_forward_ml_signals(
-    df: pl.DataFrame,
-    experiment: ExperimentConfig,
-    predictor_cols: list[str],
-    target_col: str,
-) -> pl.DataFrame:
-    all_dates = sorted(df["date"].unique().to_list())
-    rebalance = _rebalance_dates(all_dates, experiment.rebalance_period)
-    date_index = {item: idx for idx, item in enumerate(all_dates)}
-    signal_frames: list[pl.DataFrame] = []
-    model_params = experiment.model_params or MODEL_PARAMS
-
-    for rebalance_date in rebalance:
-        idx = date_index[rebalance_date]
-        if idx < max(experiment.feature.qsmom_slow, experiment.feature.forward_period, 80):
-            continue
-        train_start = all_dates[max(0, idx - experiment.train_window)]
-        train = df.filter(
-            (pl.col("date") >= train_start)
-            & (pl.col("date") < rebalance_date)
-            & pl.col(target_col).is_not_null()
-        ).drop_nulls(predictor_cols + [target_col])
-        predict = df.filter(pl.col("date") == rebalance_date).drop_nulls(predictor_cols)
-        min_predict_rows = max(
-            2, min(experiment.num_long_positions, df.select("symbol").n_unique())
-        )
-        if train.height < 100 or predict.height < min_predict_rows:
-            continue
-
-        scores = train_and_predict_xgb_regressor(
-            train_data=train,
-            predict_data=predict,
-            predictor_cols=predictor_cols,
-            target_col=target_col,
-            model_params=model_params,
-        )
-        predictions = pd.Series(scores, index=predict["symbol"].to_list())
-        weights = long_short_equal_weight_portfolio(
-            predictions=predictions,
-            num_long_positions=experiment.num_long_positions,
-            num_short_positions=experiment.num_short_positions,
-            long_threshold=effective_long_threshold(experiment.long_threshold),
-            short_threshold=experiment.short_threshold,
-            history_df=train.to_pandas(),
-        )
-        signals = signals_from_weights(rebalance_date, weights)
-        if not signals.is_empty():
-            signal_frames.append(signals)
-
-    if not signal_frames:
-        return BaseStrategy.empty_signal_frame()
-    return pl.concat(signal_frames, how="vertical").sort(["date", "symbol"])
-
-
-def run_ml_factor_experiment(
-    raw_ohlcv: pl.DataFrame, experiment: ExperimentConfig
-) -> dict[str, Any]:
-    model_frame, factor_source_map, diagnostics = build_model_frame(
-        raw_ohlcv,
-        experiment.feature,
-        return_diagnostics=True,
-    )
-    target_col = f"forward_return_{experiment.feature.forward_period}"
-    predictor_cols = choose_predictors(model_frame, experiment.feature, experiment.predictor_cols)
-    if not predictor_cols:
-        raise RuntimeError(f"{experiment.name}: no predictor columns are available")
-    signals = walk_forward_ml_signals(model_frame, experiment, predictor_cols, target_col)
-    if signals.is_empty():
-        raise RuntimeError(f"{experiment.name}: no signals generated")
-
-    bt_config = BacktestConfig(
-        workflow="research",
-        asset_types=["vn_stock"],
-        universe=UniverseConfig(vn_stock=sorted(model_frame["symbol"].unique().to_list())),
-        start_date=model_frame["date"].min(),
-        end_date=model_frame["date"].max(),
-        initial_capital=experiment.initial_capital,
-        backtest_engine="notebook",
-        rebalance_frequency=experiment.rebalance_period,
-        commission=CommissionConfig(model="percentage", rate=Decimal("0.0015")),
-        calendar="XHOSE",
-    )
-    result = run_backtest_frame(
-        engine_name="notebook_walk_forward",
-        strategy=EmptyStrategy(),
-        data=model_frame,
-        config=bt_config,
-        prebuilt_signals=signals,
-    )
-    return {
-        "result": result,
-        "model_frame": model_frame,
-        "feature_diagnostics": diagnostics,
-        "signals": signals,
-        "predictor_cols": predictor_cols,
-        "target_col": target_col,
-        "factor_sources": factor_source_map,
-    }
-
+# ---------------------------------------------------------------------------
+# Config builders
+# ---------------------------------------------------------------------------
 
 def strategy_params(strategy_config: dict[str, Any]) -> dict[str, Any]:
     strategy = strategy_config.get("strategy", {})
@@ -784,9 +194,19 @@ def target_period_from_config(strategy_config: dict[str, Any]) -> int | None:
         return None
 
 
-def configured_rebalance_period(strategy_config: dict[str, Any], override: str | None) -> str:
-    if override:
-        return override
+def configured_rebalance_period(
+    strategy_config: dict[str, Any], override: str | None
+) -> str | int:
+    if override is not None:
+        try:
+            parsed = int(override)
+            if parsed <= 5:
+                raise ValueError(f"--rebalance-period integer must be > 5, got {parsed}")
+            return parsed
+        except ValueError as exc:
+            if "must be > 5" in str(exc):
+                raise
+            return override
     params = strategy_params(strategy_config)
     value = (
         params.get("rebalance_period")
@@ -800,6 +220,7 @@ def configured_rebalance_period(strategy_config: dict[str, Any], override: str |
 def configured_model_params(
     strategy_config: dict[str, Any], args: argparse.Namespace
 ) -> dict[str, Any]:
+    from copy import deepcopy
     params = deepcopy(MODEL_PARAMS)
     trainer = strategy_params(strategy_config).get("trainer", {})
     if isinstance(trainer, dict):
@@ -877,51 +298,9 @@ def build_baseline_experiment(
     )
 
 
-def make_sweep_arms(base: ExperimentConfig) -> list[ExperimentConfig]:
-    arms: list[ExperimentConfig] = []
-    for top_n, fast, slow, num_long, depth, n_estimators in product(
-        [50, 80],
-        [21],
-        [126, 252],
-        [8, 12],
-        [2, 3],
-        [80],
-    ):
-        feature = FeatureConfig(
-            min_trading_days=base.feature.min_trading_days,
-            volume_top_n=top_n,
-            min_avg_volume=base.feature.min_avg_volume,
-            remove_large_gaps=base.feature.remove_large_gaps,
-            max_gap_days=base.feature.max_gap_days,
-            remove_low_volume=base.feature.remove_low_volume,
-            qsmom_fast=fast,
-            qsmom_slow=slow,
-            qsmom_returns=base.feature.qsmom_returns,
-            forward_period=base.feature.forward_period,
-            fundamental_termtype=base.feature.fundamental_termtype,
-        )
-        model_params = {
-            **(base.model_params or MODEL_PARAMS),
-            "max_depth": depth,
-            "n_estimators": n_estimators,
-        }
-        arms.append(
-            ExperimentConfig(
-                name=f"vn100_top{top_n}_qsmom{fast}_{slow}_long{num_long}_depth{depth}",
-                feature=feature,
-                predictor_cols=base.predictor_cols,
-                train_window=base.train_window,
-                rebalance_period=base.rebalance_period,
-                num_long_positions=num_long,
-                num_short_positions=base.num_short_positions,
-                long_threshold=base.long_threshold,
-                short_threshold=base.short_threshold,
-                model_params=model_params,
-                initial_capital=base.initial_capital,
-            )
-        )
-    return arms
-
+# ---------------------------------------------------------------------------
+# MLflow helpers
+# ---------------------------------------------------------------------------
 
 def mlflow_artifact_location(tracking_uri: str, runtime_root: Path) -> str | None:
     scheme = urlparse(tracking_uri).scheme
@@ -974,6 +353,10 @@ def mlflow_param_value(value: Any) -> str | int | float | bool | None:
     return repr(value)
 
 
+# ---------------------------------------------------------------------------
+# Artifact writers
+# ---------------------------------------------------------------------------
+
 def write_result_artifacts(run_dir: Path, payload: dict[str, Any]) -> list[Path]:
     run_dir.mkdir(parents=True, exist_ok=True)
     result: BacktestResult = payload["result"]
@@ -999,6 +382,17 @@ def write_result_artifacts(run_dir: Path, payload: dict[str, Any]) -> list[Path]
     payload["model_frame"].write_parquet(model_frame_path)
     paths.append(model_frame_path)
     return paths
+
+
+def write_run_config(run_dir: Path, args: argparse.Namespace, experiment: ExperimentConfig) -> Path:
+    path = run_dir / "run_config.yaml"
+    payload = {
+        "args": vars(args),
+        "experiment": experiment,
+        "qts_root": os.environ.get("QTS_ROOT"),
+    }
+    path.write_text(yaml.safe_dump(serializable(payload), sort_keys=True))
+    return path
 
 
 def log_to_mlflow(
@@ -1058,42 +452,9 @@ def result_row(
     }
 
 
-def serializable(value: Any) -> Any:
-    if is_dataclass(value):
-        return serializable(asdict(value))
-    if isinstance(value, dict):
-        return {str(key): serializable(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [serializable(item) for item in value]
-    if isinstance(value, date | datetime | Decimal | Path):
-        return str(value)
-    return value
-
-
-def write_run_config(run_dir: Path, args: argparse.Namespace, experiment: ExperimentConfig) -> Path:
-    path = run_dir / "run_config.yaml"
-    payload = {
-        "args": vars(args),
-        "experiment": experiment,
-        "qts_root": os.environ.get("QTS_ROOT"),
-    }
-    path.write_text(yaml.safe_dump(serializable(payload), sort_keys=True))
-    return path
-
-
-def summarize_ohlcv(ohlcv: pl.DataFrame) -> pl.DataFrame:
-    return (
-        ohlcv.group_by("symbol")
-        .agg(
-            pl.col("date").min().alias("start"),
-            pl.col("date").max().alias("end"),
-            pl.len().alias("rows"),
-            pl.col("close").last().alias("last_close"),
-            pl.col("volume").mean().alias("avg_volume"),
-        )
-        .sort("rows", descending=True)
-    )
-
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1154,7 +515,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("MLFLOW_EXPERIMENT_NAME", DEFAULT_MLFLOW_EXPERIMENT_NAME),
     )
     parser.add_argument("--train-window", type=int)
-    parser.add_argument("--rebalance-period", choices=["daily", "weekly", "monthly"])
+    parser.add_argument(
+        "--rebalance-period",
+        default=None,
+        help="Number of trading days between rebalances (integer > 5). "
+             "Legacy strings 'daily'/'weekly'/'monthly' are also accepted.",
+    )
     parser.add_argument("--predictor-cols")
     parser.add_argument("--num-long-positions", type=int)
     parser.add_argument("--num-short-positions", type=int)
@@ -1179,6 +545,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
 def run(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     runtime_root = args.runtime_root.resolve()
@@ -1190,8 +560,8 @@ def run(argv: list[str] | None = None) -> int:
 
     strategy_config = load_yaml_mapping(args.strategy_config) if args.strategy_config else {}
     feature_config = build_feature_config(strategy_config, args)
-    baseline = build_baseline_experiment(strategy_config, args, feature_config)
-    write_run_config(run_dir, args, baseline)
+    baseline_experiment = build_baseline_experiment(strategy_config, args, feature_config)
+    write_run_config(run_dir, args, baseline_experiment)
 
     symbols, benchmark_symbol = load_vn100_symbols(args.asset_config, args.max_symbols)
     request_symbols = symbols + [benchmark_symbol]
@@ -1202,7 +572,7 @@ def run(argv: list[str] | None = None) -> int:
     print(f"VN100 equity symbols: {len(symbols)}")
     print(f"Benchmark symbol: {benchmark_symbol}")
     print(f"Date range: {args.start_date} to {args.end_date}")
-    print(f"Rebalance period: {baseline.rebalance_period}")
+    print(f"Rebalance period: {baseline_experiment.rebalance_period}")
 
     ohlcv, benchmark_ohlcv, fetch_failures = run_async(
         fetch_prices_and_fundamentals(
@@ -1228,12 +598,10 @@ def run(argv: list[str] | None = None) -> int:
     summarize_ohlcv(ohlcv).to_pandas().to_csv(run_dir / "ohlcv_summary.csv", index=False)
     benchmark_ohlcv.write_parquet(run_dir / "benchmark_ohlcv.parquet")
     pd.DataFrame(fetch_failures, columns=["symbol", "error"]).to_csv(
-        run_dir / "fetch_failures.csv",
-        index=False,
+        run_dir / "fetch_failures.csv", index=False
     )
     fundamental_cache_report(symbols, termtype=args.fundamental_termtype).to_pandas().to_csv(
-        run_dir / "fundamental_cache.csv",
-        index=False,
+        run_dir / "fundamental_cache.csv", index=False
     )
 
     print(f"Fetched OHLCV rows: {ohlcv.height:,}")
@@ -1251,26 +619,24 @@ def run(argv: list[str] | None = None) -> int:
     rows: list[dict[str, Any]] = []
     payloads: dict[str, dict[str, Any]] = {}
 
-    print(f"Running baseline: {baseline.name}")
-    baseline_payload = run_ml_factor_experiment(ohlcv, baseline)
-    write_result_artifacts(run_dir / baseline.name, baseline_payload)
-    log_to_mlflow(
-        mlflow_enabled, baseline, baseline_payload, runtime_root, {"run_type": "baseline"}
-    )
-    rows.append(result_row(baseline, baseline_payload))
-    payloads[baseline.name] = baseline_payload
+    print(f"Running baseline: {baseline_experiment.name}")
+    baseline_strategy = VN100QuantamentalStrategy(baseline_experiment)
+    baseline_payload = baseline_strategy.run_experiment(ohlcv)
+    write_result_artifacts(run_dir / baseline_experiment.name, baseline_payload)
+    log_to_mlflow(mlflow_enabled, baseline_experiment, baseline_payload, runtime_root, {"run_type": "baseline"})
+    rows.append(result_row(baseline_experiment, baseline_payload))
+    payloads[baseline_experiment.name] = baseline_payload
 
     if args.run_sweeps:
-        sweep_arms = make_sweep_arms(baseline)
+        sweep_arms = make_sweep_arms(baseline_experiment)
         print(f"Prepared sweep arms: {len(sweep_arms)}")
         for experiment in sweep_arms:
             print(f"Running sweep arm: {experiment.name}")
             try:
-                payload = run_ml_factor_experiment(ohlcv, experiment)
+                strategy = VN100QuantamentalStrategy(experiment)
+                payload = strategy.run_experiment(ohlcv)
                 write_result_artifacts(run_dir / experiment.name, payload)
-                log_to_mlflow(
-                    mlflow_enabled, experiment, payload, runtime_root, {"run_type": "sweep"}
-                )
+                log_to_mlflow(mlflow_enabled, experiment, payload, runtime_root, {"run_type": "sweep"})
                 rows.append(result_row(experiment, payload))
                 payloads[experiment.name] = payload
             except Exception as exc:

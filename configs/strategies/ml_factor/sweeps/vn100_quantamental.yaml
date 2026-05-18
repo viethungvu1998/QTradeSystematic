@@ -1,0 +1,55 @@
+base_config: ../base.yaml
+tracking:
+  enabled: false
+  experiment_name: qts-vn100-quantamental
+  run_name: vn100-quantamental-sweep
+storage:
+  root: runs/vn100-quantamental-sweep
+sweep:
+  mode: optuna
+  n_trials: 40
+  study_name: vn100-quantamental
+  sampler:
+    name: tpe
+    seed: 42
+  objective:
+    metric: sharpe
+    direction: maximize
+  search_space:
+    - path: rebalance_period
+      type: int
+      low: 6
+      high: 63
+    - path: train_window
+      type: int
+      low: 126
+      high: 756
+      step: 63
+    - path: num_long_positions
+      type: int
+      low: 3
+      high: 20
+    - path: strategy.params.trainer.params.model_params.n_estimators
+      type: int
+      low: 20
+      high: 200
+      step: 20
+    - path: strategy.params.trainer.params.model_params.max_depth
+      type: int
+      low: 2
+      high: 6
+    - path: qsmom_fast
+      type: int
+      low: 5
+      high: 63
+      step: 7
+    - path: qsmom_slow
+      type: int
+      low: 63
+      high: 504
+      step: 63
+    - path: forward_period
+      type: int
+      low: 5
+      high: 63
+      step: 7

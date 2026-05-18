@@ -10,7 +10,7 @@ from .algorithms import (
     train_and_predict_xgb_ranker,
     train_and_predict_xgb_regressor,
 )
-from .portfolio_construction import (
+from qts.research.portfolio_construction import (
     long_short_cost_adjusted_portfolio,
     long_short_equal_weight_portfolio,
     long_short_exponential_weight_portfolio,

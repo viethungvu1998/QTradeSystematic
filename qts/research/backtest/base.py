@@ -113,6 +113,7 @@ class BacktestConfig:
     universe: UniverseConfig
     start_date: date | None = None
     end_date: date | None = None
+    test_start_date: date | None = None  # first bar of the out-of-sample period
     initial_capital: Decimal | None = None
     data_sources: DataSourcesConfig = field(default_factory=DataSourcesConfig)
     storage: str = "duckdb"

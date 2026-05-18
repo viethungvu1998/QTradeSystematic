@@ -27,5 +27,5 @@ sweep:
       high: 6
     - path: strategy.params.rebalance_period
       type: int
-      low: 5
-      high: 20
+      low: 6
+      high: 63
