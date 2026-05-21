@@ -138,9 +138,16 @@ def long_short_equal_weight_portfolio(
     num_short_positions: int = 0,
     long_threshold: float | None = None,
     short_threshold: float | None = None,
+    long_quantile: float | None = None,
+    short_quantile: float | None = None,
     history_df: pd.DataFrame | None = None,
 ) -> dict[str, float]:
     _check_counts(num_long_positions, num_short_positions)
+    predictions = pd.Series(predictions).dropna()
+    if long_quantile is not None and long_threshold is None and not predictions.empty:
+        long_threshold = float(predictions.quantile(long_quantile))
+    if short_quantile is not None and short_threshold is None and not predictions.empty:
+        short_threshold = float(predictions.quantile(short_quantile))
     return EqualWeightPortfolio(
         num_long_positions=num_long_positions,
         num_short_positions=num_short_positions,

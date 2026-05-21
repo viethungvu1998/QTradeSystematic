@@ -30,13 +30,8 @@ def get_feature_importance(
     Returns
     -------
     pl.DataFrame with columns [feature, importance] sorted descending by importance.
-    Raises ImportError if xgboost is not installed.
+    Raises ImportError if the XGBoost package is not installed.
     """
-    try:
-        import xgboost as xgb
-    except ImportError as exc:
-        raise ImportError("xgboost is not installed: pip install xgboost") from exc
-
     _exclude = {"date", "symbol", "open", "high", "low", "close", "volume", "signal", "weight"}
     if feature_cols is None:
         feature_cols = [
@@ -55,8 +50,9 @@ def get_feature_importance(
     X = clean.select(feature_cols).to_pandas()
     y = clean[target_col].to_pandas()
 
-    model = xgb.XGBRegressor(**params)
-    model.fit(X, y)
+    from qts.research.strategies.ml_factor.models import fit_xgb_regressor
+
+    model = fit_xgb_regressor(X, y, params)
 
     scores = model.get_booster().get_score(importance_type="gain")
     return (

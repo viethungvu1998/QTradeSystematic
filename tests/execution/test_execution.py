@@ -77,7 +77,7 @@ def test_position_sync_generates_delta_orders():
 @pytest.mark.asyncio
 async def test_sync_positions_creates_instruments_for_new_targets(stock_ohlcv):
     broker = MockBroker()
-    orders = await sync_positions(
+    orders, snapshot = await sync_positions(
         config=None,
         syncer=PositionSync(),
         brokers={AssetType.STOCK: broker},
@@ -87,12 +87,13 @@ async def test_sync_positions_creates_instruments_for_new_targets(stock_ohlcv):
     assert len(orders) == 1
     assert orders[0].instrument.symbol == "AAPL"
     assert orders[0].instrument.currency == "USD"
+    assert snapshot.equity == Decimal("0")
 
 
 @pytest.mark.asyncio
 async def test_sync_positions_creates_quote_currency_for_crypto_futures(crypto_futures_ohlcv):
     broker = MockBroker()
-    orders = await sync_positions(
+    orders, _ = await sync_positions(
         config=None,
         syncer=PositionSync(),
         brokers={AssetType.CRYPTO_FUTURES: broker},

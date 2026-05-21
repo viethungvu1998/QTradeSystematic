@@ -15,6 +15,7 @@ import polars as pl
 from qts.core.registry import Registry
 from qts.research.strategies.factor.base import BaseFactorStrategy
 from qts.research.strategies.factor.core import FORWARD_RETURN_PREFIX
+from qts.research.strategies.ml_factor.base_model import BaseModel
 
 CLASS_PERCENTILES = (0.15, 0.40, 0.60, 0.85)
 CLASS_LABEL_COLUMN = "ml_factor_class"
@@ -114,55 +115,100 @@ class MLFactorStrategy(BaseFactorStrategy):
         self,
         predictor_cols: list[str],
         target_col: str,
-        train_func: Callable[[pd.DataFrame, pd.DataFrame], np.ndarray],
-        portfolio_func: Callable[..., dict[str, float]],
+        train_func: Callable[[pd.DataFrame, pd.DataFrame], np.ndarray] | None = None,
+        portfolio_func: Callable[..., dict[str, float]] | None = None,
         rebalance_period: int = 10,
         min_train_rows: int = 2,
+        model: BaseModel | None = None,
+        task: str = "classification",
     ) -> None:
         _validate_target_col(target_col)
         _validate_predictor_columns(predictor_cols, target_col)
         self.predictor_cols = list(predictor_cols)
         self.target_col = target_col
+        self.model = model
         self.train_func = train_func
         self.portfolio_func = portfolio_func
+        self.task = task
         self.rebalance_period = _positive_int(rebalance_period, "rebalance_period")
         self.min_train_rows = int(min_train_rows)
         self.last_thresholds: MLFactorClassThresholds | None = None
 
     @classmethod
-    def from_config_params(cls, params: Mapping[str, object]) -> MLFactorStrategy:
+    def from_config_params(
+        cls,
+        params: Mapping[str, object],
+        *,
+        portfolio_func: Callable | None = None,
+    ) -> MLFactorStrategy:
         payload = dict(params)
         predictor_cols = [str(item) for item in payload.pop("predictor_cols")]
         target_col = str(payload.pop("target_col"))
+        task = str(payload.pop("task", "classification"))
         rebalance_period = _positive_int(
             payload.pop("rebalance_period", payload.pop("rebalance_frequency", 10)),
             "rebalance_period",
         )
         min_train_rows = int(payload.pop("min_train_rows", 2))
-        trainer = _named_section(payload.pop("trainer", {"name": "xgb_classifier"}), "trainer")
-        portfolio = _named_section(payload.pop("portfolio"), "portfolio")
+        model_raw = payload.pop("model", None)
+        trainer_raw = payload.pop("trainer", None)
+        resolved_model: BaseModel | None = None
+        train_func = None
 
-        trainer_name = str(trainer["name"])
-        if trainer_name in _LEGACY_REGRESSION_TRAINERS:
-            raise ValueError(
-                f"MLFactorStrategy requires a classification trainer, got {trainer_name}"
+        if model_raw is not None:
+            model_cfg = _named_section(model_raw, "model")
+            model_name = str(model_cfg["name"])
+            model_params = dict(model_cfg.get("params", {}))
+            if "classifier" in model_name and task != "classification":
+                import warnings
+
+                warnings.warn(
+                    f"model '{model_name}' implies classification but task='{task}' was specified.",
+                    stacklevel=2,
+                )
+            if "regressor" in model_name and task != "regression":
+                import warnings
+
+                warnings.warn(
+                    f"model '{model_name}' implies regression but task='{task}' was specified.",
+                    stacklevel=2,
+                )
+            model_cls = Registry.get_model(model_name)
+            resolved_model = model_cls(task=task, **model_params)
+        elif trainer_raw is not None:
+            trainer = _named_section(trainer_raw, "trainer")
+            trainer_name = str(trainer["name"])
+            if trainer_name in _LEGACY_REGRESSION_TRAINERS:
+                raise ValueError(
+                    f"MLFactorStrategy requires a classification trainer, got {trainer_name}"
+                )
+            trainer_params = dict(trainer.get("params", {}))
+            trainer_params.setdefault("predictor_cols", predictor_cols)
+            trainer_params.setdefault("target_col", target_col)
+            train_func = partial(Registry.get_factor_trainer(trainer_name), **trainer_params)
+        else:
+            model_cls = Registry.get_model("xgb_classifier")
+            resolved_model = model_cls(task=task)
+
+        if portfolio_func is None and "portfolio" in payload:
+            portfolio = _named_section(payload.pop("portfolio"), "portfolio")
+            portfolio_func = partial(
+                Registry.get_portfolio_constructor(str(portfolio["name"])),
+                **dict(portfolio.get("params", {})),
             )
-        trainer_params = dict(trainer.get("params", {}))
-        trainer_params.setdefault("predictor_cols", predictor_cols)
-        trainer_params.setdefault("target_col", target_col)
-        train_func = partial(Registry.get_factor_trainer(trainer_name), **trainer_params)
+        else:
+            payload.pop("portfolio", None)
+        payload.pop("rebalance_period", None)
 
-        portfolio_func = partial(
-            Registry.get_portfolio_constructor(str(portfolio["name"])),
-            **dict(portfolio.get("params", {})),
-        )
         return cls(
-            predictor_cols,
-            target_col,
-            train_func,
-            portfolio_func,
-            rebalance_period,
-            min_train_rows,
+            predictor_cols=predictor_cols,
+            target_col=target_col,
+            train_func=train_func,
+            portfolio_func=portfolio_func,
+            rebalance_period=rebalance_period,
+            min_train_rows=min_train_rows,
+            model=resolved_model,
+            task=task,
         )
 
     def generate_signals(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -182,15 +228,24 @@ class MLFactorStrategy(BaseFactorStrategy):
         if len(train_pd) < self.min_train_rows or predict_pd.empty:
             return self.empty_signal_frame()
 
-        self.last_thresholds = MLFactorClassThresholds.fit(
-            train_pd[self.target_col],
-            target_col=self.target_col,
-        )
-        scores = np.asarray(self.train_func(train_pd, predict_pd), dtype=float)
+        if self.model is not None:
+            self.model.fit(train_pd[self.predictor_cols], train_pd[self.target_col])
+            scores = np.asarray(self.model.predict(predict_pd[self.predictor_cols]), dtype=float)
+        elif self.train_func is not None:
+            self.last_thresholds = MLFactorClassThresholds.fit(
+                train_pd[self.target_col],
+                target_col=self.target_col,
+            )
+            scores = np.asarray(self.train_func(train_pd, predict_pd), dtype=float)
+        else:
+            raise RuntimeError("MLFactorStrategy requires either model= or train_func=.")
+
         if scores.shape[0] != len(predict_pd):
             raise ValueError("ML factor trainer output must align to predict rows")
 
         predictions = pd.Series(scores, index=predict_pd["symbol"].values)
+        if self.portfolio_func is None:
+            raise RuntimeError("MLFactorStrategy requires portfolio_func=.")
         weights_dict = self.portfolio_func(predictions, history_df=train_pd)
         if not weights_dict:
             return self.empty_signal_frame()
@@ -205,12 +260,6 @@ def train_and_predict_xgb_classifier(
     model_params: dict[str, Any] | None = None,
 ) -> np.ndarray:
     """Fit an XGBoost multiclass classifier and return signed class scores."""
-
-    try:
-        import xgboost as xgb
-    except ImportError as exc:
-        raise ImportError("xgboost is not installed: pip install xgboost") from exc
-
     _validate_target_col(target_col)
     _validate_predictor_columns(predictor_cols, target_col)
     train = _to_pandas(train_data, label="train_data")
@@ -224,22 +273,11 @@ def train_and_predict_xgb_classifier(
     if train.empty or predict.empty:
         return np.array([], dtype=float)
 
-    thresholds = MLFactorClassThresholds.fit(train[target_col], target_col=target_col)
-    labelled = thresholds.append_labels(train)
-    y_train = labelled[CLASS_LABEL_COLUMN].to_numpy(dtype=int)
-    class_labels = np.array(sorted(np.unique(y_train)), dtype=int)
-    if class_labels.size < 2:
-        return np.full(len(predict), MLFactorClass(int(y_train[0])).score, dtype=float)
-    encoded_y = np.searchsorted(class_labels, y_train)
+    from qts.research.strategies.ml_factor.models import XGBClassifierModel
 
-    params = _classifier_model_params(model_params, num_class=int(class_labels.size))
-    model = xgb.XGBClassifier(**params)
-    model.fit(labelled[predictor_cols], encoded_y)
-    probabilities = _align_class_probabilities(
-        model.predict_proba(predict[predictor_cols]),
-        class_labels,
-    )
-    return class_scores_from_probabilities(probabilities)
+    model = XGBClassifierModel(task="classification", **(model_params or {}))
+    model.fit(train[predictor_cols], train[target_col])
+    return model.predict(predict[predictor_cols])
 
 
 def class_scores_from_probabilities(probabilities: np.ndarray) -> np.ndarray:
@@ -399,6 +437,8 @@ def _positive_int(value: object, label: str) -> int:
 
 
 def _named_section(value: object, label: str) -> dict[str, object]:
+    if isinstance(value, str):
+        return {"name": value, "params": {}}
     if not isinstance(value, Mapping) or "name" not in value:
         raise ValueError(f"{label} must be a mapping with a name")
     return dict(value)

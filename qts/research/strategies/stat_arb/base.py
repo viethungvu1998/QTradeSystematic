@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -49,6 +49,9 @@ class BaseStatArbStrategy(BaseStrategy):
         hedge_ratio_max: float | None = None,
         hedge_ratio_ewm_span: int | None = None,
         allow_negative_hedge_ratio: bool = True,
+        spread_fn: Callable | None = None,
+        signal_fn: Callable | None = None,
+        portfolio_func: Callable | None = None,
     ) -> None:
         self.entry_zscore = entry_zscore
         self.exit_zscore = exit_zscore
@@ -70,6 +73,9 @@ class BaseStatArbStrategy(BaseStrategy):
         self.hedge_ratio_max = hedge_ratio_max
         self.hedge_ratio_ewm_span = hedge_ratio_ewm_span
         self.allow_negative_hedge_ratio = allow_negative_hedge_ratio
+        self.spread_fn = spread_fn
+        self.signal_fn = signal_fn
+        self.portfolio_func = portfolio_func
 
     def universe_close_matrix(self, data: pl.DataFrame) -> pd.DataFrame:
         close_wide = (
@@ -133,52 +139,77 @@ class BaseStatArbStrategy(BaseStrategy):
         if len(pair_prices) < max(self.zscore_window + 1, 2):
             return None
 
-        if self.hedge_method == "rolling_ols":
-            spread, hedge_series = compute_rolling_ols_spread(
+        if self.spread_fn is not None and self.signal_fn is not None:
+            spread, hedge_series = self.spread_fn(
                 pair_prices,
                 symbol_a,
                 symbol_b,
-                self.hedge_window,
-                self.min_obs,
-                self.hedge_ratio_ewm_span,
-                self.hedge_ratio_min,
-                self.hedge_ratio_max,
-                self.allow_negative_hedge_ratio,
+                hedge_method=self.hedge_method,
+                window=self.hedge_window or self.min_obs,
+                lookback_days=self.min_obs,
+                ewm_span=self.hedge_ratio_ewm_span,
+                ratio_min=self.hedge_ratio_min,
+                ratio_max=self.hedge_ratio_max,
+                allow_negative=self.allow_negative_hedge_ratio,
+            )
+            if spread.empty:
+                return None
+            signal_state = self.signal_fn(
+                spread,
+                side=self.side,
+                stop_z=self.stop_z,
+                max_holding_bars=self.max_holding_bars,
             )
         else:
-            hedge_ratio = estimate_hedge_ratio(pair_prices[symbol_a], pair_prices[symbol_b], method=self.hedge_method)
-            if not np.isfinite(hedge_ratio):
+            if self.hedge_method == "rolling_ols":
+                spread, hedge_series = compute_rolling_ols_spread(
+                    pair_prices,
+                    symbol_a,
+                    symbol_b,
+                    self.hedge_window,
+                    self.min_obs,
+                    self.hedge_ratio_ewm_span,
+                    self.hedge_ratio_min,
+                    self.hedge_ratio_max,
+                    self.allow_negative_hedge_ratio,
+                )
+            else:
+                hedge_ratio = estimate_hedge_ratio(pair_prices[symbol_a], pair_prices[symbol_b], method=self.hedge_method)
+                if not np.isfinite(hedge_ratio):
+                    return None
+                hedge_ratio = clip_hedge_ratio(hedge_ratio, self.hedge_ratio_min, self.hedge_ratio_max)
+                if not self.allow_negative_hedge_ratio:
+                    hedge_ratio = abs(hedge_ratio)
+                hedge_series = pd.Series(float(hedge_ratio), index=pair_prices.index)
+                spread = compute_spread(pair_prices[symbol_a], pair_prices[symbol_b], hedge_ratio)
+
+            zscore = compute_zscore(spread, self.zscore_window).replace([np.inf, -np.inf], np.nan).dropna()
+            if zscore.empty:
                 return None
-            hedge_ratio = clip_hedge_ratio(hedge_ratio, self.hedge_ratio_min, self.hedge_ratio_max)
-            if not self.allow_negative_hedge_ratio:
-                hedge_ratio = abs(hedge_ratio)
-            hedge_series = pd.Series(float(hedge_ratio), index=pair_prices.index)
-            spread = compute_spread(pair_prices[symbol_a], pair_prices[symbol_b], hedge_ratio)
 
-        zscore = compute_zscore(spread, self.zscore_window).replace([np.inf, -np.inf], np.nan).dropna()
-        if zscore.empty:
-            return None
+            signal_state = generate_zscore_signals(
+                zscore,
+                entry_z=self.entry_zscore,
+                exit_z=self.exit_zscore,
+                side=self.side,
+                stop_z=self.stop_z,
+                max_holding_bars=self.max_holding_bars,
+            )
 
-        hedge_series = hedge_series.loc[zscore.index].replace([np.inf, -np.inf], np.nan).ffill().bfill()
-        if hedge_series.empty:
-            return None
-
-        signal_state = generate_zscore_signals(
-            zscore,
-            entry_z=self.entry_zscore,
-            exit_z=self.exit_zscore,
-            side=self.side,
-            stop_z=self.stop_z,
-            max_holding_bars=self.max_holding_bars,
-        )
         long_entries = signal_state["long_entries"]
         long_exits = signal_state["long_exits"]
         short_entries = signal_state["short_entries"]
         short_exits = signal_state["short_exits"]
+        if long_entries.empty:
+            return None
+
+        hedge_series = hedge_series.loc[long_entries.index].replace([np.inf, -np.inf], np.nan).ffill().bfill()
+        if hedge_series.empty:
+            return None
 
         rows: list[dict[str, object]] = []
         spread_state = 0
-        for timestamp in zscore.index:
+        for timestamp in long_entries.index:
             next_state = spread_state
             if bool(long_exits.loc[timestamp]) or bool(short_exits.loc[timestamp]):
                 next_state = 0

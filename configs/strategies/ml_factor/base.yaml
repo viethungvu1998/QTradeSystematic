@@ -5,12 +5,14 @@ universe:
   stock: [AAPL, MSFT, GOOGL, AMZN, META]
 start_date: "2022-01-01"
 end_date: "2024-12-31"
-test_start_date: "2024-01-01"   # OOS: 2024-01-01 → 2024-12-31 (last 1 of 3 years)
 initial_capital: 100000
 data_sources:
   stock: fmp
 storage: duckdb
 features:
+  transforms:
+    - name: qsmom
+      params: {roc_fast_period: 21, roc_slow_period: 252, returns_period: 126}
   indicators:
     - name: rsi
       params: {periods: [14]}
@@ -21,25 +23,24 @@ features:
 strategy:
   type: ml_factor
   params:
-    rebalance_period: 10
+    task: classification
     min_train_rows: 20
-    predictor_cols: [rsi_14, roc_21]
+    predictor_cols: [close_qsmom_21_252_126, rsi_14, roc_21]
     target_col: forward_return_21
-    trainer:
+    model:
       name: xgb_classifier
       params:
-        model_params:
-          objective: multi:softprob
-          num_class: 5
-          eval_metric: mlogloss
-          n_estimators: 50
-          max_depth: 3
-          random_state: 42
-    portfolio:
-      name: equal_weight
-      params:
-        num_long_positions: 3
-        num_short_positions: 0
+        n_estimators: 50
+        max_depth: 3
+        random_state: 42
+portfolio_construction:
+  name: equal_weight
+  params:
+    num_long_positions: 3
+    num_short_positions: 0
+validation:
+  method: single_split
+  test_start_date: "2024-01-01"
 backtest_engine: vectorbt
-rebalance_frequency: 10
+rebalance: 10
 train_window: 252

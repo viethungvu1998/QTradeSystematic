@@ -79,6 +79,7 @@ Current adapter status:
   - `factor`
   - `ml_factor`
   - `stat_arb`
+  - `vn100_quantamental`
 - Analysis utilities under:
   - `qts/research/portfolio_analysis/`
   - `qts/research/statistical_analysis/`
@@ -121,17 +122,46 @@ Supported direction:
 
 ## Installation
 
+<!-- AUTO-GENERATED from pyproject.toml [project.optional-dependencies] -->
+
+All commands use the repo-local venv (`python >=3.13` required):
+
 ```bash
-pip install -e .
-pip install -e ".[data]"
-pip install -e ".[research]"
-pip install -e ".[zipline]"
-pip install -e ".[execution]"
-pip install -e ".[orchestration]"
-pip install -e ".[all]"
+.venv/bin/pip install -e ".[dev]"           # core + pytest + ruff only
+.venv/bin/pip install -e ".[all]"           # everything below
 ```
 
-Python requirement: `>=3.13`
+| Extra | What it adds |
+|-------|-------------|
+| `data` | `httpx` — HTTP client for remote data sources |
+| `vn` | `vnstock` — VN equity/futures/warrant data |
+| `research` | `matplotlib`, `xgboost`, `vectorbtpro` — feature engineering and backtesting |
+| `notebook` | `ipykernel`, `IPython`, `nbclient`, `nbformat` — Jupyter support |
+| `zipline` | `zipline-reloaded` — Zipline backtest engine |
+| `execution` | `binance-connector`, `futu-api`, `python-dotenv` — live broker adapters |
+| `orchestration` | `prefect`, `prefect-redis`, `asyncpg`, `redis` — Prefect workflow engine |
+| `tracking` | `mlflow`, `psycopg2-binary` — experiment tracking |
+| `tuning` | `optuna` — hyperparameter sweeps |
+| `dev` | `pytest`, `pytest-asyncio`, `pytest-cov`, `ruff` — development toolchain |
+
+<!-- END AUTO-GENERATED -->
+
+## Environment Variables
+
+<!-- AUTO-GENERATED from .env.example -->
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `QTS_ROOT` | No | Override default data root (`~/.qts/`). Set to an absolute path. |
+| `FMP_API_KEY` | For `fmp` source | Financial Modeling Prep API key for US stock data. |
+| `BINANCE_API_KEY` | For live Binance | Binance API key (spot + futures). |
+| `BINANCE_API_SECRET` | For live Binance | Binance API secret. |
+| `DNSE_USERNAME` | For `dnse` source/broker | DNSE account username for VN market data and execution. |
+| `DNSE_PASSWORD` | For `dnse` source/broker | DNSE account password. |
+| `MOOMOO_HOST` | For `moomoo` broker | OpenD gateway host (e.g. `127.0.0.1`). |
+| `MOOMOO_PORT` | For `moomoo` broker | OpenD gateway port (e.g. `11111`). |
+
+<!-- END AUTO-GENERATED -->
 
 ## Configuration
 

@@ -4,12 +4,17 @@ universe:
   stock: [AAPL, MSFT, GOOGL, AMZN, META]
 start_date: "2022-01-01"
 end_date: "2024-12-31"
-test_start_date: "2024-01-01"   # OOS: 2024-01-01 → 2024-12-31 (last 1 of 3 years)
 initial_capital: 100000
 data_sources:
   stock: fmp
 storage: duckdb
 features:
+  transforms:
+    - name: qsmom
+      params:
+        roc_fast_period: 21
+        roc_slow_period: 252
+        returns_period: 126
   indicators:
     - name: rsi
       params: {periods: [14]}
@@ -20,8 +25,21 @@ features:
 strategy:
   type: factor
   params:
+    predictor_cols: [close_qsmom_21_252_126]
+    algorithm:
+      name: cross_sectional_rank
+      params: {}
     long_quantile: 0.7
     short_quantile: 0.3
+portfolio_construction:
+  name: equal_weight
+  params:
+    num_long_positions: 20
+    long_quantile: 0.7
+    short_quantile: 0.3
+validation:
+  method: single_split
+  test_start_date: "2024-01-01"
 backtest_engine: vectorbt
-rebalance_frequency: monthly
+rebalance: 21
 train_window: 252

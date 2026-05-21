@@ -10,14 +10,17 @@ import polars as pl
 
 from qts.core.registry import Registry
 from qts.research.backtest._runner import walk_forward_signals
-from qts.research.backtest.engines._targets import build_target_schedule
 from qts.research.backtest.base import (
     BacktestConfig,
     BacktestResult,
     BaseEngine,
     empty_backtest_result,
+    empty_portfolio_snapshots_frame,
+    empty_trade_log_frame,
 )
+from qts.research.backtest.engines._targets import build_target_schedule
 from qts.research.backtest.metrics import build_metrics
+from qts.research.backtest.observability import vectorbt_observability
 from qts.research.strategies.base import BaseStrategy
 from qts.research.strategies.stat_arb.base import BaseStatArbStrategy
 
@@ -109,6 +112,11 @@ def _vbt_pf_to_result(pf, signals: pl.DataFrame) -> BacktestResult:
             "equity": val_series.to_numpy(),
         })
     ).with_columns(pl.col("date").cast(pl.Date))
+    try:
+        trade_log, portfolio_snapshots = vectorbt_observability(pf, val_series)
+    except Exception:
+        trade_log = empty_trade_log_frame()
+        portfolio_snapshots = empty_portfolio_snapshots_frame()
 
     return BacktestResult(
         engine_name="vectorbt",
@@ -116,6 +124,8 @@ def _vbt_pf_to_result(pf, signals: pl.DataFrame) -> BacktestResult:
         returns=returns_df,
         equity_curve=equity_df,
         signals=signals,
+        trade_log=trade_log,
+        portfolio_snapshots=portfolio_snapshots,
     )
 
 

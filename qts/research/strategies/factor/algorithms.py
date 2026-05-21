@@ -31,10 +31,7 @@ def train_and_predict_xgb_regressor(
     model_params: dict,
 ) -> np.ndarray:
     """Fit an XGBoost regressor and return predictions for predict_data."""
-    try:
-        import xgboost as xgb
-    except ImportError as exc:
-        raise ImportError("xgboost is not installed: pip install xgboost") from exc
+    from qts.research.strategies.ml_factor.models import fit_xgb_regressor
 
     train = _to_pandas(train_data, label="train_data")
     predict = _to_pandas(predict_data, label="predict_data")
@@ -43,8 +40,7 @@ def train_and_predict_xgb_regressor(
     y_train = train[target_col]
     X_predict = predict[predictor_cols]
 
-    model = xgb.XGBRegressor(**model_params)
-    model.fit(X_train, y_train)
+    model = fit_xgb_regressor(X_train, y_train, model_params)
     return model.predict(X_predict)
 
 
@@ -56,10 +52,7 @@ def train_and_predict_xgb_ranker(
     model_params: dict,
 ) -> np.ndarray:
     """Fit an XGBoost ranker (per-date groups) and return predicted scores."""
-    try:
-        import xgboost as xgb
-    except ImportError as exc:
-        raise ImportError("xgboost is not installed: pip install xgboost") from exc
+    from qts.research.strategies.ml_factor.models import fit_xgb_ranker
 
     train = _to_pandas(train_data, label="train_data").sort_values("date").reset_index(drop=True)
     predict = _to_pandas(predict_data, label="predict_data")
@@ -67,8 +60,7 @@ def train_and_predict_xgb_ranker(
     train["_group_id"] = pd.factorize(train["date"])[0]
     qid = train["_group_id"].values
 
-    model = xgb.XGBRanker(**model_params)
-    model.fit(train[predictor_cols], train[target_col], qid=qid)
+    model = fit_xgb_ranker(train[predictor_cols], train[target_col], qid, model_params)
     return model.predict(predict[predictor_cols])
 
 

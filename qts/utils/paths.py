@@ -20,3 +20,15 @@ def cache_dir() -> Path:
 
 def bundle_dir() -> Path:
     return qts_root() / "bundles"
+
+
+def backtest_exports_dir() -> Path:
+    path = qts_root() / "exports" / "backtest"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def live_portfolio_dir() -> Path:
+    path = qts_root() / "exports" / "live"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

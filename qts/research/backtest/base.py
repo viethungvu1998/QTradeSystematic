@@ -11,6 +11,39 @@ import polars as pl
 
 from qts.research.strategies.base import BaseStrategy
 
+TRADE_LOG_SCHEMA = {
+    "ticker": pl.String,
+    "entry_time": pl.Datetime(time_unit="us"),
+    "exit_time": pl.Datetime(time_unit="us"),
+    "start_price": pl.Float64,
+    "end_price": pl.Float64,
+    "quantity": pl.Float64,
+    "profit_pct": pl.Float64,
+    "fee": pl.Float64,
+    "side": pl.String,
+}
+TOKEN_SNAPSHOT_SCHEMA = pl.Struct(
+    {
+        "token": pl.String,
+        "quantity": pl.Float64,
+        "avg_buy_price": pl.Float64,
+        "current_price": pl.Float64,
+    }
+)
+PORTFOLIO_SNAPSHOTS_SCHEMA = {
+    "timestamp": pl.Datetime(time_unit="us"),
+    "tokens": pl.List(TOKEN_SNAPSHOT_SCHEMA),
+    "equity": pl.Float64,
+}
+
+
+def empty_trade_log_frame() -> pl.DataFrame:
+    return pl.DataFrame(schema=TRADE_LOG_SCHEMA)
+
+
+def empty_portfolio_snapshots_frame() -> pl.DataFrame:
+    return pl.DataFrame(schema=PORTFOLIO_SNAPSHOTS_SCHEMA)
+
 
 def empty_backtest_result(
     engine_name: str = "vectorbt",
@@ -25,6 +58,8 @@ def empty_backtest_result(
         returns=empty_returns,
         equity_curve=empty_equity,
         signals=signals if signals is not None else pl.DataFrame(),
+        trade_log=empty_trade_log_frame(),
+        portfolio_snapshots=empty_portfolio_snapshots_frame(),
     )
 
 
@@ -60,7 +95,14 @@ class IndicatorConfig:
 
 
 @dataclass(slots=True)
+class TransformStepConfig:
+    name: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class FeaturesConfig:
+    transforms: list[TransformStepConfig] = field(default_factory=list)
     indicators: list[IndicatorConfig] = field(default_factory=list)
     technical: bool = False
     fundamental: bool = False
@@ -107,6 +149,21 @@ class PromotionGateConfig:
 
 
 @dataclass(slots=True)
+class PortfolioConstructionConfig:
+    name: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ValidationConfig:
+    method: str = "single_split"
+    test_start_date: date | None = None
+    n_folds: int = 5
+    fold_size_days: int = 252
+    embargo_days: int = 0
+
+
+@dataclass(slots=True)
 class BacktestConfig:
     workflow: str
     asset_types: list[str]
@@ -129,6 +186,8 @@ class BacktestConfig:
     brokers: BrokersConfig | None = None
     schedule: ScheduleConfig | None = None
     promotion_gate: PromotionGateConfig | None = None
+    portfolio_construction: PortfolioConstructionConfig | None = None
+    validation: ValidationConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +197,10 @@ class BacktestResult:
     returns: pl.DataFrame
     equity_curve: pl.DataFrame
     signals: pl.DataFrame
+    trade_log: pl.DataFrame = field(default_factory=empty_trade_log_frame)
+    portfolio_snapshots: pl.DataFrame = field(default_factory=empty_portfolio_snapshots_frame)
+    metrics_is: dict[str, float] = field(default_factory=dict)
+    metrics_oos: dict[str, float] = field(default_factory=dict)
 
 
 class BaseEngine:

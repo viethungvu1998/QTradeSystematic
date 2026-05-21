@@ -25,6 +25,11 @@ class Registry:
     _calendars: ClassVar[RegistryDict] = {}
     _factor_trainers: ClassVar[RegistryDict] = {}
     _portfolio_constructors: ClassVar[RegistryDict] = {}
+    _transforms: ClassVar[RegistryDict] = {}
+    _signal_algorithms: ClassVar[RegistryDict] = {}
+    _spread_models: ClassVar[RegistryDict] = {}
+    _signal_rules: ClassVar[RegistryDict] = {}
+    _models: ClassVar[RegistryDict] = {}
 
     @classmethod
     def _register(cls, registry: RegistryDict, name: str) -> Callable[[Any], Any]:
@@ -136,3 +141,43 @@ class Registry:
     @classmethod
     def get_portfolio_constructor(cls, name: str) -> Callable[..., Any]:
         return cls._get(cls._portfolio_constructors, name, "portfolio constructor")
+
+    @classmethod
+    def register_transform(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._transforms, name)
+
+    @classmethod
+    def get_transform(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._transforms, name, "transform")
+
+    @classmethod
+    def register_signal_algorithm(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._signal_algorithms, name)
+
+    @classmethod
+    def get_signal_algorithm(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._signal_algorithms, name, "signal algorithm")
+
+    @classmethod
+    def register_spread_model(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._spread_models, name)
+
+    @classmethod
+    def get_spread_model(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._spread_models, name, "spread model")
+
+    @classmethod
+    def register_signal_rule(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._signal_rules, name)
+
+    @classmethod
+    def get_signal_rule(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._signal_rules, name, "signal rule")
+
+    @classmethod
+    def register_model(cls, name: str) -> Callable[[Any], Any]:
+        return cls._register(cls._models, name)
+
+    @classmethod
+    def get_model(cls, name: str) -> Callable[..., Any]:
+        return cls._get(cls._models, name, "model")

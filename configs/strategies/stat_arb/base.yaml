@@ -4,21 +4,33 @@ universe:
   stock: [AAPL, MSFT, GOOGL, AMZN, META]
 start_date: "2020-01-01"
 end_date: "2024-12-31"
-test_start_date: "2023-01-01"   # OOS: 2023-01-01 → 2024-12-31 (last 2 of 5 years)
 initial_capital: 100000
 data_sources:
   stock: fmp
 storage: duckdb
 features:
-  technical: false
+  transforms: []
+  indicators: []
 strategy:
   type: stat_arb
   params:
+    spread_model:
+      name: ols
+      params: {}
+    signal_rule:
+      name: zscore_threshold
+      params: {entry_z: 2.0, exit_z: 0.0, zscore_window: 22}
     entry_zscore: 2.0
     exit_zscore: 0.0
     zscore_window: 22
     max_pairs: 10
     min_obs: 120
+portfolio_construction:
+  name: equal_weight
+  params: {}
+validation:
+  method: single_split
+  test_start_date: "2023-01-01"
 backtest_engine: vectorbt
-rebalance_frequency: daily
+rebalance: 1
 train_window: 252

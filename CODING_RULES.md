@@ -11,6 +11,11 @@
 7. **No hardcoded parameters in orchestration or config resolution.** `flow.py` contains no literal asset types, engine names, commission rates, schedules, or broker names. Registry-backed seams must not be bypassed with hardcoded constructors when the registry already exists. If a value is not in the YAML schema or a registered component, it does not belong in the flow.
 8. **Use the repo-local environment.** Install dependencies into `QTradeSystematic/.venv` and run Python, pytest, and tooling from that environment instead of the global interpreter.
 9. **Credentials come from environment variables, not code or config files.** Adapters read credentials (API keys, secrets) from env vars at `connect()` time using `python-dotenv` or OS environment. Never hardcode keys or embed them in YAML. The `.env` file at the repo root is the canonical credential store and must never be committed.
+10. **Before adding a new class/module/layer, answer:**
+-  Who else calls this besides the current caller? (reuse check)
+- What breaks at test time if this layer doesn't exist? (testability check)  
+- Is there a data shape change happening here? (translation check)
+If all three answers are "nothing/nobody/no" → implement inline, no new layer.
 
 ---
 

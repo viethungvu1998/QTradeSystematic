@@ -9,6 +9,7 @@ import polars as pl
 
 from qts.research.backtest.base import BacktestConfig, BacktestResult
 from qts.research.backtest.metrics import build_metrics
+from qts.research.backtest.observability import backtest_frame_observability
 from qts.research.strategies.base import BaseStrategy
 
 
@@ -133,10 +134,41 @@ def run_backtest_frame(
     returns_list = [float(value) for value in daily["portfolio_return"].to_list()]
     equity_list = [capital, *equity_values]
     metrics = build_metrics(returns_list, equity_list)
+    metrics_is: dict[str, float] = {}
+    metrics_oos: dict[str, float] = {}
+    test_start = None
+    if config.validation and config.validation.test_start_date:
+        test_start = config.validation.test_start_date
+    elif config.test_start_date:
+        test_start = config.test_start_date
+
+    if test_start is not None:
+        is_daily = daily.filter(pl.col("date") < test_start)
+        oos_daily = daily.filter(pl.col("date") >= test_start)
+        if is_daily.height > 1:
+            metrics_is = _build_metrics_from_daily(is_daily, capital)
+        if oos_daily.height > 1:
+            metrics_oos = _build_metrics_from_daily(oos_daily, capital)
+
+    trade_log, portfolio_snapshots = backtest_frame_observability(joined, daily)
     return BacktestResult(
         engine_name=engine_name,
         metrics=metrics,
         returns=daily.select("date", "portfolio_return"),
         equity_curve=daily.select("date", "equity"),
         signals=signals,
+        trade_log=trade_log,
+        portfolio_snapshots=portfolio_snapshots,
+        metrics_is=metrics_is,
+        metrics_oos=metrics_oos,
     )
+
+
+def _build_metrics_from_daily(daily: pl.DataFrame, capital: float) -> dict[str, float]:
+    returns = [float(value) for value in daily["portfolio_return"].to_list()]
+    equity = [capital]
+    running = capital
+    for value in returns:
+        running *= 1 + value
+        equity.append(running)
+    return build_metrics(returns, equity)

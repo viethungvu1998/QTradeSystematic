@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import polars as pl
 
 from qts.core.instrument import AssetType, Instrument
+from qts.core.observability import PortfolioSnapshot, snapshot_portfolio
+from qts.core.order import Order
+from qts.core.portfolio import Portfolio, Position
 from qts.orchestration.prefect_compat import task
 
 
@@ -47,14 +51,19 @@ async def sync_positions(
     brokers,
     target_weights: dict[str, Decimal],
     data: pl.DataFrame,
-):
+) -> tuple[list[Order], PortfolioSnapshot]:
     """Compute rebalance orders."""
 
-    positions = []
+    positions: list[Position] = []
     account_value = Decimal("0")
     for broker in brokers.values():
         positions.extend(await broker.get_positions())
         account_value += await broker.get_account_value()
+    # Cash is not available separately from account value at this layer.
+    live_snapshot = snapshot_portfolio(
+        Portfolio(positions=positions, cash=Decimal("0")),
+        datetime.now(UTC),
+    )
     latest = (
         data.sort(["symbol", "date"])
         .group_by("symbol")
@@ -66,13 +75,14 @@ async def sync_positions(
     instruments = {position.instrument.symbol: position.instrument for position in positions}
     for symbol in target_weights:
         instruments.setdefault(symbol, _instrument_for_symbol(symbol))
-    return syncer.compute_deltas(
+    orders = syncer.compute_deltas(
         target_weights,
         positions,
         instruments,
         latest_prices,
         account_value,
     )
+    return orders, live_snapshot
 
 
 @task(retries=2, retry_delay_seconds=60, name="execute-rebalance")

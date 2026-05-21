@@ -13,9 +13,17 @@ import polars as pl
 from qts.core.instrument import AssetType
 from qts.core.registry import Registry
 from qts.research.backtest._runner import run_backtest_frame, walk_forward_signals
+from qts.research.backtest.base import (
+    BacktestConfig,
+    BacktestResult,
+    BaseEngine,
+    empty_backtest_result,
+    empty_portfolio_snapshots_frame,
+    empty_trade_log_frame,
+)
 from qts.research.backtest.engines._targets import build_target_schedule, schedule_to_lookup
-from qts.research.backtest.base import BacktestConfig, BacktestResult, BaseEngine, empty_backtest_result
 from qts.research.backtest.metrics import build_metrics
+from qts.research.backtest.zipline_observability import zipline_observability
 from qts.research.strategies.base import BaseStrategy
 from qts.research.strategies.stat_arb.base import BaseStatArbStrategy
 
@@ -293,6 +301,7 @@ def _perf_to_result(
     *,
     trading_calendar=None,
     shift_to_previous_session: bool = False,
+    symbol_map: dict[str, str] | None = None,
 ) -> BacktestResult:
     returns_series = perf["returns"].fillna(0.0).astype(float)
     equity_series = perf["portfolio_value"].astype(float)
@@ -317,6 +326,11 @@ def _perf_to_result(
     returns_list = returns_series.to_list()
     equity_list = equity_series.to_list()
     metrics = build_metrics(returns_list, equity_list)
+    try:
+        trade_log, portfolio_snapshots = zipline_observability(perf, symbol_map)
+    except Exception:
+        trade_log = empty_trade_log_frame()
+        portfolio_snapshots = empty_portfolio_snapshots_frame()
 
     return BacktestResult(
         engine_name="zipline",
@@ -324,6 +338,8 @@ def _perf_to_result(
         returns=returns_df,
         equity_curve=equity_df,
         signals=signals,
+        trade_log=trade_log,
+        portfolio_snapshots=portfolio_snapshots,
     )
 
 
@@ -473,4 +489,5 @@ class ZiplineReloadedEngine(BaseEngine):
             signals,
             trading_calendar=trading_calendar,
             shift_to_previous_session=shift_to_next_session and calendar_name == CRYPTO_CALENDAR,
+            symbol_map=symbol_map,
         )

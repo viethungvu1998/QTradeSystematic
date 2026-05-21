@@ -1,5 +1,7 @@
 """Stat-arb strategies."""
 
+from qts.research.strategies.stat_arb import factories as _stat_arb_factories  # noqa: F401
+
 from .base import BaseStatArbStrategy
 from .core import (
     PairCandidate,
