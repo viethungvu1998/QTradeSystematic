@@ -3,20 +3,110 @@ asset_types: [vn_stock]
 
 universe:
   vn_stock:
-    - VN:VNM
-    - VN:VCB
+    - VN:ACB
+    - VN:CTS
+    - VN:DBC
+    - VN:SHB
+    - VN:VCG
+    - VN:VIX
+    - VN:VND
+    - VN:DCM
+    - VN:DGC
+    - VN:ANV
     - VN:BID
+    - VN:BMP
+    - VN:BSI
+    - VN:BVH
+    - VN:CII
+    - VN:CMG
+    - VN:CTD
     - VN:CTG
-    - VN:TCB
-    - VN:HPG
+    - VN:DIG
+    - VN:DPM
+    - VN:DXG
+    - VN:EIB
+    - VN:FPT
     - VN:GAS
-    - VN:SAB
+    - VN:GMD
+    - VN:HAG
+    - VN:HCM
+    - VN:HDC
+    - VN:HDG
+    - VN:HPG
+    - VN:HSG
+    - VN:HT1
+    - VN:IMP
+    - VN:KBC
+    - VN:KDC
+    - VN:KDH
+    - VN:MBB
     - VN:MSN
     - VN:MWG
+    - VN:NKG
+    - VN:NLG
+    - VN:NT2
+    - VN:PAN
+    - VN:PDR
+    - VN:PHR
+    - VN:PNJ
+    - VN:PPC
+    - VN:PTB
+    - VN:PVD
+    - VN:PVT
+    - VN:REE
+    - VN:SBT
+    - VN:SJS
+    - VN:SSI
+    - VN:STB
+    - VN:TLG
+    - VN:VCB
+    - VN:VHC
+    - VN:VIC
+    - VN:VNM
+    - VN:VSC
+    - VN:HHV
+    - VN:TCH
+    - VN:PC1
+    - VN:SAB
+    - VN:FTS
+    - VN:VIB
+    - VN:VJC
+    - VN:PLX
+    - VN:DGW
+    - VN:SCS
+    - VN:VCI
+    - VN:BWE
+    - VN:VPB
+    - VN:LPB
+    - VN:VPI
+    - VN:VRE
+    - VN:KOS
+    - VN:CTR
+    - VN:HDB
+    - VN:GEX
+    - VN:BCM
+    - VN:POW
+    - VN:FRT
+    - VN:VHM
+    - VN:GVR
+    - VN:TPB
+    - VN:TCB
+    - VN:EVF
+    - VN:SZC
+    - VN:VGC
+    - VN:OCB
+    - VN:MSB
+    - VN:DXS
+    - VN:SSB
+    - VN:SIP
+    - VN:NAB
+    - VN:VTP
+    - VN:DSE
+    - VN:GEE
 
-start_date: "2020-01-01"
-end_date: "2024-12-31"
-test_start_date: "2023-01-01"
+start_date: "2018-01-01"
+end_date: "2025-12-31"
+test_start_date: "2024-01-01"
 initial_capital: 100000000
 
 data_sources:
@@ -26,31 +116,34 @@ storage: duckdb
 features:
   transforms:
     - name: qsmom
-      params: {roc_fast_period: 21, roc_slow_period: 252, returns_period: 126}
+      params: {roc_fast_period: 21, roc_slow_period: 50, returns_period: 50}
   indicators:
     - name: rsi
       params: {periods: [14]}
     - name: roc
       params: {periods: [21]}
   forward_returns:
-    periods: [21]
+    periods: [12]
 
 strategy:
   type: ml_factor
   params:
     predictor_cols:
-      - close_qsmom_21_252_126
+      # - close_qsmom_21_50_50
       - rsi_14
       - roc_21
-    target_col: forward_return_21
+    target_col: forward_return_12
     task: classification
-    rebalance_period: 21
+    rebalance_period: 12
+    cv_splits: 5
+    cv_gap: 12
+    cv_test_size: 12
     model:
       name: xgb_classifier
       params:
-        n_estimators: 100
-        max_depth: 4
-        learning_rate: 0.05
+        n_estimators: 300
+        max_depth: 10
+        learning_rate: 0.01
         random_state: 42
 
 portfolio_construction:
@@ -60,8 +153,8 @@ portfolio_construction:
     num_short_positions: 0
 
 backtest_engine: vectorbt
-train_window: 252
-rebalance_frequency: monthly
+train_window: 252  # 252 * 3
+rebalance_frequency: 12
 
 commission:
   model: percentage

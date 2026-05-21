@@ -125,6 +125,65 @@ def test_strategy_thresholds_ignore_prediction_date_target(ml_df):
     assert not result.is_empty()
 
 
+def test_strategy_uses_sklearn_time_series_split_last_fold(ml_df):
+    from sklearn.model_selection import TimeSeriesSplit
+
+    last_date = ml_df["date"].max()
+    captured: dict[str, list[pd.DatetimeIndex]] = {"train_dates": [], "predict_dates": []}
+
+    def train_func(train: pd.DataFrame, predict: pd.DataFrame) -> np.ndarray:
+        captured["train_dates"].append(
+            pd.DatetimeIndex(pd.to_datetime(train["date"]).unique()).sort_values()
+        )
+        captured["predict_dates"].append(
+            pd.DatetimeIndex(pd.to_datetime(predict["date"]).unique()).sort_values()
+        )
+        return np.linspace(-1.0, 1.0, len(predict))
+
+    def portfolio_func(predictions: pd.Series, history_df: pd.DataFrame | None = None):
+        ranked = predictions.sort_values(ascending=False)
+        return {str(ranked.index[0]): 1.0, str(ranked.index[-1]): -1.0}
+
+    strategy = MLFactorStrategy(
+        _PREDICTOR_COLS,
+        _TARGET_COL,
+        train_func,
+        portfolio_func,
+        cv_splits=3,
+        cv_gap=2,
+        cv_test_size=5,
+    )
+
+    result = strategy.generate_signals(ml_df)
+
+    trainable = (
+        ml_df.filter(pl.col("date") < last_date)
+        .drop_nulls(_PREDICTOR_COLS + [_TARGET_COL])
+        .sort(["date", "symbol"])
+        .to_pandas()
+    )
+    dates = pd.DatetimeIndex(pd.to_datetime(trainable["date"]).unique()).sort_values()
+    train_idx, test_idx = list(
+        TimeSeriesSplit(n_splits=3, gap=2, test_size=5).split(dates)
+    )[-1]
+    expected_train_dates = pd.DatetimeIndex(dates[train_idx]).sort_values()
+    expected_test_dates = pd.DatetimeIndex(dates[test_idx]).sort_values()
+
+    assert len(captured["train_dates"]) == 3
+    assert captured["train_dates"][-1].equals(expected_train_dates)
+    assert all(
+        [item.date() for item in predict_dates] == [last_date]
+        for predict_dates in captured["predict_dates"]
+    )
+    assert [item.date() for item in strategy.last_cv_train_dates] == [
+        item.date() for item in expected_train_dates
+    ]
+    assert [item.date() for item in strategy.last_cv_test_dates] == [
+        item.date() for item in expected_test_dates
+    ]
+    assert not result.is_empty()
+
+
 def test_generate_signals_columns(strategy, ml_df):
     result = strategy.generate_signals(ml_df)
     assert set(result.columns) == _SIGNAL_COLS

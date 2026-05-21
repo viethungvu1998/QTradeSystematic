@@ -121,6 +121,10 @@ class MLFactorStrategy(BaseFactorStrategy):
         min_train_rows: int = 2,
         model: BaseModel | None = None,
         task: str = "classification",
+        cv_splits: int = 5,
+        cv_gap: int = 0,
+        cv_test_size: int | None = None,
+        cv_max_train_size: int | None = None,
     ) -> None:
         _validate_target_col(target_col)
         _validate_predictor_columns(predictor_cols, target_col)
@@ -132,7 +136,13 @@ class MLFactorStrategy(BaseFactorStrategy):
         self.task = task
         self.rebalance_period = _positive_int(rebalance_period, "rebalance_period")
         self.min_train_rows = int(min_train_rows)
+        self.cv_splits = _min_int(cv_splits, "cv_splits", minimum=2)
+        self.cv_gap = _non_negative_int(cv_gap, "cv_gap")
+        self.cv_test_size = _optional_positive_int(cv_test_size, "cv_test_size")
+        self.cv_max_train_size = _optional_positive_int(cv_max_train_size, "cv_max_train_size")
         self.last_thresholds: MLFactorClassThresholds | None = None
+        self.last_cv_train_dates: list[pd.Timestamp] = []
+        self.last_cv_test_dates: list[pd.Timestamp] = []
 
     @classmethod
     def from_config_params(
@@ -150,6 +160,13 @@ class MLFactorStrategy(BaseFactorStrategy):
             "rebalance_period",
         )
         min_train_rows = int(payload.pop("min_train_rows", 2))
+        cv_splits = _min_int(payload.pop("cv_splits", 5), "cv_splits", minimum=2)
+        cv_gap = _non_negative_int(payload.pop("cv_gap", 0), "cv_gap")
+        cv_test_size = _optional_positive_int(payload.pop("cv_test_size", None), "cv_test_size")
+        cv_max_train_size = _optional_positive_int(
+            payload.pop("cv_max_train_size", None),
+            "cv_max_train_size",
+        )
         model_raw = payload.pop("model", None)
         trainer_raw = payload.pop("trainer", None)
         resolved_model: BaseModel | None = None
@@ -209,9 +226,15 @@ class MLFactorStrategy(BaseFactorStrategy):
             min_train_rows=min_train_rows,
             model=resolved_model,
             task=task,
+            cv_splits=cv_splits,
+            cv_gap=cv_gap,
+            cv_test_size=cv_test_size,
+            cv_max_train_size=cv_max_train_size,
         )
 
     def generate_signals(self, df: pl.DataFrame) -> pl.DataFrame:
+        self.last_cv_train_dates = []
+        self.last_cv_test_dates = []
         if df.is_empty():
             return self.empty_signal_frame()
         if self.target_col not in df.columns:
@@ -221,32 +244,53 @@ class MLFactorStrategy(BaseFactorStrategy):
 
         df_pd = df.sort(["date", "symbol"]).to_pandas()
         last_date = df_pd["date"].max()
-        train_pd = df_pd[(df_pd["date"] < last_date) & df_pd[self.target_col].notna()].copy()
+        trainable_pd = df_pd[(df_pd["date"] < last_date) & df_pd[self.target_col].notna()].copy()
         predict_pd = df_pd[df_pd["date"] == last_date].copy()
-        train_pd = _drop_model_nulls(train_pd, [*self.predictor_cols, self.target_col])
+        trainable_pd = _drop_model_nulls(trainable_pd, [*self.predictor_cols, self.target_col])
         predict_pd = _drop_model_nulls(predict_pd, self.predictor_cols)
-        if len(train_pd) < self.min_train_rows or predict_pd.empty:
+        if len(trainable_pd) < self.min_train_rows or predict_pd.empty:
             return self.empty_signal_frame()
 
-        if self.model is not None:
-            self.model.fit(train_pd[self.predictor_cols], train_pd[self.target_col])
-            scores = np.asarray(self.model.predict(predict_pd[self.predictor_cols]), dtype=float)
-        elif self.train_func is not None:
-            self.last_thresholds = MLFactorClassThresholds.fit(
-                train_pd[self.target_col],
-                target_col=self.target_col,
-            )
-            scores = np.asarray(self.train_func(train_pd, predict_pd), dtype=float)
-        else:
-            raise RuntimeError("MLFactorStrategy requires either model= or train_func=.")
-
+        splits = _time_series_cv_splits(
+            trainable_pd,
+            n_splits=self.cv_splits,
+            gap=self.cv_gap,
+            test_size=self.cv_test_size,
+            max_train_size=self.cv_max_train_size,
+        )
+        fold_scores: list[np.ndarray] = []
+        last_train_pd: pd.DataFrame | None = None
+        last_test_pd: pd.DataFrame | None = None
+        for train_pd, test_pd in splits:
+            if len(train_pd) < self.min_train_rows or test_pd.empty:
+                continue
+            if self.model is not None:
+                self.model.fit(train_pd[self.predictor_cols], train_pd[self.target_col])
+                fold_scores.append(
+                    np.asarray(self.model.predict(predict_pd[self.predictor_cols]), dtype=float)
+                )
+            elif self.train_func is not None:
+                self.last_thresholds = MLFactorClassThresholds.fit(
+                    train_pd[self.target_col],
+                    target_col=self.target_col,
+                )
+                fold_scores.append(np.asarray(self.train_func(train_pd, predict_pd), dtype=float))
+            else:
+                raise RuntimeError("MLFactorStrategy requires either model= or train_func=.")
+            last_train_pd = train_pd
+            last_test_pd = test_pd
+        if not fold_scores or last_train_pd is None or last_test_pd is None:
+            return self.empty_signal_frame()
+        self.last_cv_train_dates = _unique_sorted_timestamps(last_train_pd["date"])
+        self.last_cv_test_dates = _unique_sorted_timestamps(last_test_pd["date"])
+        scores = np.mean(np.vstack(fold_scores), axis=0)
         if scores.shape[0] != len(predict_pd):
             raise ValueError("ML factor trainer output must align to predict rows")
 
         predictions = pd.Series(scores, index=predict_pd["symbol"].values)
         if self.portfolio_func is None:
             raise RuntimeError("MLFactorStrategy requires portfolio_func=.")
-        weights_dict = self.portfolio_func(predictions, history_df=train_pd)
+        weights_dict = self.portfolio_func(predictions, history_df=last_train_pd)
         if not weights_dict:
             return self.empty_signal_frame()
         return self.signal_frame_from_weights(last_date, weights_dict)
@@ -258,6 +302,10 @@ def train_and_predict_xgb_classifier(
     predictor_cols: list[str],
     target_col: str,
     model_params: dict[str, Any] | None = None,
+    cv_splits: int = 5,
+    cv_gap: int = 0,
+    cv_test_size: int | None = None,
+    cv_max_train_size: int | None = None,
 ) -> np.ndarray:
     """Fit an XGBoost multiclass classifier and return signed class scores."""
     _validate_target_col(target_col)
@@ -272,12 +320,28 @@ def train_and_predict_xgb_classifier(
     predict = _drop_model_nulls(predict, predictor_cols)
     if train.empty or predict.empty:
         return np.array([], dtype=float)
+    splits = _time_series_cv_splits(
+        train,
+        n_splits=_min_int(cv_splits, "cv_splits", minimum=2),
+        gap=_non_negative_int(cv_gap, "cv_gap"),
+        test_size=_optional_positive_int(cv_test_size, "cv_test_size"),
+        max_train_size=_optional_positive_int(cv_max_train_size, "cv_max_train_size"),
+    )
+    if not splits:
+        return np.array([], dtype=float)
 
     from qts.research.strategies.ml_factor.models import XGBClassifierModel
 
-    model = XGBClassifierModel(task="classification", **(model_params or {}))
-    model.fit(train[predictor_cols], train[target_col])
-    return model.predict(predict[predictor_cols])
+    fold_scores = []
+    for train_fold, test_fold in splits:
+        if train_fold.empty or test_fold.empty:
+            continue
+        model = XGBClassifierModel(task="classification", **(model_params or {}))
+        model.fit(train_fold[predictor_cols], train_fold[target_col])
+        fold_scores.append(model.predict(predict[predictor_cols]))
+    if not fold_scores:
+        return np.array([], dtype=float)
+    return np.mean(np.vstack(fold_scores), axis=0)
 
 
 def class_scores_from_probabilities(probabilities: np.ndarray) -> np.ndarray:
@@ -409,6 +473,49 @@ def _to_pandas(frame: object, *, label: str = "frame") -> pd.DataFrame:
     raise TypeError(f"{label} must be a pandas or polars DataFrame; got {type(frame)!r}")
 
 
+def _time_series_cv_splits(
+    frame: pd.DataFrame,
+    *,
+    n_splits: int,
+    gap: int,
+    test_size: int | None,
+    max_train_size: int | None,
+) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
+    if "date" not in frame.columns:
+        raise ValueError("TimeSeriesSplit requires a date column")
+
+    from sklearn.model_selection import TimeSeriesSplit
+
+    sorted_frame = frame.sort_values(["date", "symbol"]).copy()
+    sorted_frame["_cv_date"] = pd.to_datetime(sorted_frame["date"])
+    dates = sorted_frame["_cv_date"].drop_duplicates().sort_values().to_numpy()
+    if len(dates) <= n_splits:
+        return []
+    splitter = TimeSeriesSplit(
+        n_splits=n_splits,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
+    )
+    try:
+        index_splits = list(splitter.split(dates))
+    except ValueError:
+        return []
+
+    frames = []
+    for train_idx, test_idx in index_splits:
+        train_dates = set(dates[train_idx])
+        test_dates = set(dates[test_idx])
+        train = sorted_frame[sorted_frame["_cv_date"].isin(train_dates)].drop(columns="_cv_date")
+        test = sorted_frame[sorted_frame["_cv_date"].isin(test_dates)].drop(columns="_cv_date")
+        frames.append((train.copy(), test.copy()))
+    return frames
+
+
+def _unique_sorted_timestamps(values: pd.Series) -> list[pd.Timestamp]:
+    return list(pd.DatetimeIndex(pd.to_datetime(values).drop_duplicates()).sort_values())
+
+
 def _validate_target_col(target_col: str) -> None:
     if not any(
         target_col == prefix or target_col.startswith(prefix) for prefix in _TARGET_PREFIXES
@@ -434,6 +541,31 @@ def _positive_int(value: object, label: str) -> int:
     if value < 1:
         raise ValueError(f"{label} must be a positive integer")
     return value
+
+
+def _min_int(value: object, label: str, *, minimum: int) -> int:
+    result = _non_negative_int(value, label)
+    if result < minimum:
+        raise ValueError(f"{label} must be >= {minimum}")
+    return result
+
+
+def _non_negative_int(value: object, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a non-negative integer")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a non-negative integer") from exc
+    if result < 0:
+        raise ValueError(f"{label} must be a non-negative integer")
+    return result
+
+
+def _optional_positive_int(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    return _positive_int(value, label)
 
 
 def _named_section(value: object, label: str) -> dict[str, object]:
