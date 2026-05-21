@@ -1,0 +1,70 @@
+workflow: research
+asset_types: [vn_stock]
+
+universe:
+  vn_stock:
+    - VN:VNM
+    - VN:VCB
+    - VN:BID
+    - VN:CTG
+    - VN:TCB
+    - VN:HPG
+    - VN:GAS
+    - VN:SAB
+    - VN:MSN
+    - VN:MWG
+
+start_date: "2020-01-01"
+end_date: "2024-12-31"
+test_start_date: "2023-01-01"
+initial_capital: 100000000
+
+data_sources:
+  vn_stock: vnstock
+storage: duckdb
+
+features:
+  transforms:
+    - name: qsmom
+      params: {roc_fast_period: 21, roc_slow_period: 252, returns_period: 126}
+  indicators:
+    - name: rsi
+      params: {periods: [14]}
+    - name: roc
+      params: {periods: [21]}
+  forward_returns:
+    periods: [21]
+
+strategy:
+  type: ml_factor
+  params:
+    predictor_cols:
+      - close_qsmom_21_252_126
+      - rsi_14
+      - roc_21
+    target_col: forward_return_21
+    task: classification
+    rebalance_period: 21
+    model:
+      name: xgb_classifier
+      params:
+        n_estimators: 100
+        max_depth: 4
+        learning_rate: 0.05
+        random_state: 42
+
+portfolio_construction:
+  name: equal_weight
+  params:
+    num_long_positions: 5
+    num_short_positions: 0
+
+backtest_engine: vectorbt
+train_window: 252
+rebalance_frequency: monthly
+
+commission:
+  model: percentage
+  rate: 0.0015
+
+benchmark: "VN:VNINDEX"

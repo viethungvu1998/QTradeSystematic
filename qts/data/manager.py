@@ -14,6 +14,15 @@ from qts.data.bundles.base import BaseBundleAdapter
 from qts.data.bundles.zipline_ingest import ingest_duckdb_to_bundle
 from qts.data.storage.base import BaseStorage
 
+_PRICE_HISTORY_DATA_TYPES: dict[AssetType, DataType] = {
+    AssetType.STOCK: DataType.OHLCV,
+    AssetType.VN_STOCK: DataType.OHLCV,
+    AssetType.VN_WARRANT: DataType.OHLCV,
+    AssetType.VN_FUTURES: DataType.FUTURES_OHLCV,
+    AssetType.CRYPTO: DataType.OHLCV,
+    AssetType.CRYPTO_FUTURES: DataType.FUTURES_OHLCV,
+}
+
 
 class DataManager:
     """Routes requests to the correct source and storage layers."""
@@ -228,6 +237,13 @@ class DataManager:
 
     def _table_name(self, asset_type: AssetType, data_type: DataType) -> str:
         return self._table_map.get((asset_type, data_type), data_type.value)
+
+    def price_history_table(self, symbol: str) -> str | None:
+        asset_type = AssetType.from_symbol(symbol)
+        data_type = _PRICE_HISTORY_DATA_TYPES.get(asset_type)
+        if data_type is None:
+            return None
+        return self._table_name(asset_type, data_type)
 
     def _cache_key(self, data_type: DataType, symbol: str, **kwargs) -> str:
         normalized_kwargs = "_".join(

@@ -2,18 +2,10 @@
 
 from __future__ import annotations
 
-from qts.config.builder import ASSET_COMPONENTS
+from qts.config.builder import _collect_components
 from qts.core.instrument import AssetType
 from qts.data.manager import DataManager
 from qts.execution.router import OrderRouter
-
-
-def _collect_components(resolved: object, *, suffix: str) -> dict[AssetType, object]:
-    return {
-        asset_type: component
-        for asset_type, name in ASSET_COMPONENTS
-        if (component := getattr(resolved, f"{name}_{suffix}", None)) is not None
-    }
 
 
 def resolved_brokers(resolved: object) -> dict[AssetType, object]:

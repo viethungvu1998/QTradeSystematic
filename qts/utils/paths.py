@@ -28,6 +28,12 @@ def backtest_exports_dir() -> Path:
     return path
 
 
+def tearsheet_dir() -> Path:
+    path = backtest_exports_dir() / "tearsheets"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def live_portfolio_dir() -> Path:
     path = qts_root() / "exports" / "live"
     path.mkdir(parents=True, exist_ok=True)

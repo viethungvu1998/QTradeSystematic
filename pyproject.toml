@@ -67,8 +67,11 @@ tracking = [
 tuning = [
   "optuna>=4.2.0",
 ]
+reporting = [
+  "pyfolio-reloaded>=0.9.5",
+]
 all = [
-  "qtradesystematic[data,vn,research,notebook,zipline,execution,orchestration,tracking,tuning,dev]",
+  "qtradesystematic[data,vn,research,notebook,zipline,execution,orchestration,tracking,tuning,reporting,dev]",
 ]
 
 [tool.hatch.build.targets.wheel]

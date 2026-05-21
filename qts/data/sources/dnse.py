@@ -7,15 +7,14 @@ OHLCV:    GET /price/ohlc  — type=STOCK (equities + warrants), type=DERIVATIVE
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
-import base64
 import urllib.parse
 import uuid
 import warnings
 from datetime import UTC, date, datetime
-from datetime import timezone
 
 import polars as pl
 
@@ -110,7 +109,7 @@ def _epoch(d: date) -> int:
 
 
 def _rfc2822_now() -> str:
-    return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S %z")
+    return datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S %z")
 
 
 def _build_signature_header(

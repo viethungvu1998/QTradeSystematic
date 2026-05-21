@@ -87,10 +87,7 @@ def _fetch_klines(client, binance_sym: str, interval: str, start_ms: int | None,
             kwargs["startTime"] = next_start_ms
         if end_ms is not None:
             kwargs["endTime"] = end_ms
-        try:
-            batch = client.klines(binance_sym, interval, **kwargs)
-        except Exception as exc:
-            raise exc
+        batch = client.klines(binance_sym, interval, **kwargs)
         if not batch:
             break
         all_rows.extend(batch)

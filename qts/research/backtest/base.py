@@ -188,6 +188,7 @@ class BacktestConfig:
     promotion_gate: PromotionGateConfig | None = None
     portfolio_construction: PortfolioConstructionConfig | None = None
     validation: ValidationConfig | None = None
+    benchmark: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

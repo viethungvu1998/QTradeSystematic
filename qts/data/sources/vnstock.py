@@ -25,6 +25,7 @@ from qts.core.errors import DataSourceError
 from qts.core.registry import Registry
 from qts.data._schemas import OHLCV_COLUMNS, DataType
 from qts.data.base import BaseDataSource
+from qts.data.vn_symbols import strip_vn_prefix
 from qts.utils.paths import cache_dir
 
 _KBS_BASE = "https://kbbuddywts.kbsec.com.vn/iis-server/investment"
@@ -84,13 +85,6 @@ def _to_kbs_interval(interval: str) -> str:
     return _INTERVAL_SUFFIX.get(interval.lower(), "day")
 
 
-def _strip_vn_prefix(symbol: str) -> str:
-    for prefix in ("VNF:", "VNW:", "VN:"):
-        if symbol.startswith(prefix):
-            return symbol[len(prefix):]
-    return symbol
-
-
 _INDEX_SYMBOLS = frozenset({
     "VNINDEX", "HNXINDEX", "UPCOMINDEX", "VN30", "VN100", "HNX30",
 })
@@ -102,7 +96,7 @@ def _price_scale(symbol: str) -> float:
     """Prices in thousands of VND for stocks/warrants; full points for derivatives/indices."""
     if symbol.startswith("VNF:"):
         return 1.0
-    if _strip_vn_prefix(symbol) in _INDEX_SYMBOLS:
+    if strip_vn_prefix(symbol) in _INDEX_SYMBOLS:
         return 1.0
     return 1000.0
 
@@ -336,7 +330,7 @@ class _KBSClient:
 
 def _is_index(symbol: str) -> bool:
     """Return True only for known VN index codes (not equity tickers)."""
-    return _strip_vn_prefix(symbol) in _INDEX_SYMBOLS
+    return strip_vn_prefix(symbol) in _INDEX_SYMBOLS
 
 
 @Registry.register_data_source("vnstock")
@@ -407,7 +401,7 @@ class VnstockDataSource(BaseDataSource):
             raise DataSourceError("start and end are required for live KBS OHLCV", symbol)
         try:
             rows = self._client.get_ohlcv(
-                symbol=_strip_vn_prefix(symbol),
+                symbol=strip_vn_prefix(symbol),
                 start=start,
                 end=end,
                 interval=interval,
@@ -442,7 +436,7 @@ class VnstockDataSource(BaseDataSource):
             except KeyError as exc:
                 raise DataSourceError("Unknown vnstock fundamentals symbol", symbol) from exc
 
-        ticker = _strip_vn_prefix(symbol)
+        ticker = strip_vn_prefix(symbol)
         cache_path = _fundamentals_cache_path(ticker, termtype)
 
         if not force_refresh and cache_path.exists():
@@ -527,7 +521,7 @@ class VnstockFuturesDataSource(BaseDataSource):
             )
         try:
             rows = self._client.get_ohlcv(
-                symbol=_to_krx_futures(_strip_vn_prefix(symbol)),
+                symbol=_to_krx_futures(strip_vn_prefix(symbol)),
                 start=start,
                 end=end,
                 interval=interval,

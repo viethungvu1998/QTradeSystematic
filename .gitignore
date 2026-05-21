@@ -8,3 +8,5 @@ docker/env/.env
 docker/env/*.env
 !docker/env/.env.example
 .qts_notebook_runtime
+
+.claude/worktrees

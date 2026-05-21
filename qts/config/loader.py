@@ -54,6 +54,7 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "brokers",
     "schedule",
     "promotion_gate",
+    "benchmark",
 }
 BASE_CONFIG_KEY = "base_config"
 
@@ -252,6 +253,7 @@ def load_config_from_mapping(raw: Mapping[str, Any]) -> BacktestConfig:
         else None,
         portfolio_construction=portfolio_construction,
         validation=validation,
+        benchmark=payload.get("benchmark"),
     )
 
 

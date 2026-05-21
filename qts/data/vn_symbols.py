@@ -18,8 +18,6 @@ def is_vn_warrant_code(symbol: str) -> bool:
 
 def to_vn_warrant_request(symbol: str) -> str:
     raw = strip_vn_prefix(symbol).upper()
-    if is_vn_warrant_code(raw):
-        return f"VNW:{raw}"
     return f"VNW:{raw}"
 
 

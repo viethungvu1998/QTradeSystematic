@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -25,7 +26,51 @@ from qts.orchestration.tasks.research_tasks import build_features, run_backtest
 from qts.utils.export import export_live_portfolio, export_portfolio_snapshots, export_trade_log
 from qts.utils.paths import backtest_exports_dir, live_portfolio_dir
 
+if TYPE_CHECKING:
+    import pandas as pd
+
 _RESEARCH_WORKFLOWS = frozenset({"research", "validation"})
+
+
+def _fetch_benchmark_returns(
+    symbol: str,
+    start_date,
+    end_date,
+    manager,
+) -> pd.Series | None:
+    try:
+        import pandas as pd
+
+        table = manager.price_history_table(symbol)
+        if table is None or not manager.storage.exists(table):
+            return None
+
+        frame = manager.storage.read(table)
+        if frame.is_empty() or "date" not in frame.columns or "close" not in frame.columns:
+            return None
+
+        predicate = pl.col("symbol") == symbol
+        if start_date is not None:
+            predicate &= pl.col("date") >= start_date
+        if end_date is not None:
+            predicate &= pl.col("date") <= end_date
+
+        df = frame.filter(predicate).select(["date", "close"]).sort("date").to_pandas()
+        if df.empty:
+            return None
+
+        df["date"] = pd.to_datetime(df["date"], utc=True)
+        returns = df.set_index("date")["close"].pct_change().dropna()
+        returns.name = symbol
+        return returns
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to fetch benchmark returns for %s; proceeding without benchmark",
+            symbol,
+        )
+        return None
 
 
 def _target_weights_from_signals(signals: pl.DataFrame) -> dict[str, Decimal]:
@@ -79,7 +124,15 @@ async def run_resolved_config(resolved):
         featured,
         **_backtest_kwargs(config, feature_pipeline, ohlcv),
     )
-    _export_backtest_observability(result, tracker)
+    benchmark_rets = None
+    if getattr(config, "benchmark", None):
+        benchmark_rets = _fetch_benchmark_returns(
+            config.benchmark,
+            config.start_date,
+            config.end_date,
+            manager,
+        )
+    _export_backtest_observability(result, tracker, benchmark_rets=benchmark_rets)
     if config.workflow in _RESEARCH_WORKFLOWS:
         return result
 
@@ -105,16 +158,24 @@ async def run_resolved_config(resolved):
     }
 
 
-def _export_backtest_observability(result, tracker) -> None:
+def _export_backtest_observability(result, tracker, benchmark_rets=None) -> None:
     stamp = _timestamp_slug()
+    run_id = f"{getattr(result, 'engine_name', 'backtest')}_{stamp}"
     if getattr(result, "trade_log", pl.DataFrame()).height > 0:
-        trade_log_path = backtest_exports_dir() / f"{result.engine_name}_{stamp}_trade_log.csv"
+        trade_log_path = backtest_exports_dir() / f"{run_id}_trade_log.csv"
         export_trade_log(result, trade_log_path)
         _log_artifact(tracker, trade_log_path)
     if getattr(result, "portfolio_snapshots", pl.DataFrame()).height > 0:
-        snapshots_path = backtest_exports_dir() / f"{result.engine_name}_{stamp}_snapshots.csv"
+        snapshots_path = backtest_exports_dir() / f"{run_id}_snapshots.csv"
         export_portfolio_snapshots(result, snapshots_path)
         _log_artifact(tracker, snapshots_path)
+    if getattr(result, "returns", pl.DataFrame()).height > 0:
+        from qts.research.backtest.tearsheet import save_tearsheet
+        from qts.utils.paths import tearsheet_dir
+
+        pdf = save_tearsheet(result, tearsheet_dir(), run_id, benchmark_rets=benchmark_rets)
+        if pdf:
+            _log_artifact(tracker, pdf)
 
 
 def _live_export_path(timestamp: datetime) -> Path:
