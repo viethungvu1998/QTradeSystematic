@@ -28,6 +28,7 @@ Shared models and extension points.
 - `portfolio.py`: `Position`, `Portfolio`
 - `events.py`: async tick/order event models
 - `registry.py`: central plugin registry
+- `observability.py`: `ClosedTrade`, `PositionSnapshot`, `TradeLog` result types
 
 Asset type routing is derived from symbol strings via `AssetType.from_symbol()`:
 
@@ -116,8 +117,15 @@ Feature engineering, strategy logic, backtesting, and analysis helpers.
 ```text
 qts/research/
 ├── backtest/
+│   ├── engines/
+│   ├── simulation/
+│   ├── observability.py          ← VectorBT result extraction
+│   └── zipline_observability.py  ← Zipline result extraction
 ├── features/
+│   ├── indicators/
+│   └── transforms/               ← qsmom, price_preprocessor, universe_screener
 ├── portfolio_analysis/
+├── portfolio_construction/
 ├── statistical_analysis/
 └── strategies/
 ```
@@ -130,36 +138,55 @@ qts/research/
 - Legacy `technical` feature still exists
 - Fine-grained indicator plugins live under `features/indicators/`
 
+<!-- AUTO-GENERATED from Registry decorators in qts/research/features/ -->
+
 Registered feature keys:
 
 - `technical`
 - `fundamental`
 - `vn_fundamental`
 - `onchain`
-- `rsi`
-- `roc`
-- `macd`
-- `adx`
-- `atr`
-- `bollinger`
-- `hist_vol`
-- `obv`
-- `volume_ratio`
-- `zscore`
+- `forward_returns`
+- `rsi`, `roc`, `macd`, `adx`, `atr`, `bollinger`, `hist_vol`, `obv`, `volume_ratio`, `zscore`
+
+Registered transform keys:
+
+- `qsmom` — QS momentum transform (`features/transforms/momentum.py`)
+- `price_preprocessor` — price quality preprocessing (`features/transforms/quality.py`)
+- `universe_screener` — universe filtering (`features/transforms/screener.py`)
+
+<!-- END AUTO-GENERATED -->
 
 #### Strategies
+
+<!-- AUTO-GENERATED from Registry decorators in qts/research/strategies/ -->
 
 Registered strategy keys:
 
 - `factor`
 - `ml_factor`
 - `stat_arb`
+- `vn100_quantamental`
 
-Supporting modules also exist for:
+Registered signal algorithm keys (`factor` family):
 
-- factor training algorithms
-- portfolio construction helpers
-- pair selection and spread signal generation
+- `cross_sectional_rank`
+- `factor_as_signal`
+- `ic_weighted`
+
+Registered spread model keys (`stat_arb` family):
+
+- `ols`
+- `rolling_ols`
+
+Registered ML model keys (`ml_factor` family):
+
+- `xgb_classifier`
+- `xgb_regressor`
+- `linear`
+- `ic_composite`
+
+<!-- END AUTO-GENERATED -->
 
 Refactor direction for strategy families:
 
@@ -192,7 +219,7 @@ Simulation model registrations:
 - Fill models: `immediate`, `next_open`, `vwap`
 - Slippage models: `fixed`, `volatility_scaled`
 - Commission models: `percentage`, `per_trade`
-- Calendars: `nyse`, `hkex`, `crypto`
+- Calendars: `nyse`, `hkex`, `hose`, `crypto`
 
 ### `qts/execution`
 
