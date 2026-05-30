@@ -13,9 +13,10 @@ from qts.config.builder import Config
 from qts.core.instrument import AssetType, Instrument
 from qts.core.observability import PortfolioSnapshot
 from qts.core.portfolio import Portfolio, Position
+from qts.execution.router import OrderRouter
 from qts.execution.sync import PositionSync
 from qts.orchestration.prefect_compat import flow
-from qts.orchestration.runtime import build_data_manager, build_order_router, resolved_brokers
+from qts.orchestration.runtime import build_data_manager, resolved_brokers
 from qts.orchestration.tasks.data_tasks import (
     download_fundamentals,
     download_futures_ohlcv,
@@ -74,9 +75,13 @@ def _fetch_benchmark_returns(
 
 
 def _target_weights_from_signals(signals: pl.DataFrame) -> dict[str, Decimal]:
-    latest = signals.sort(["symbol", "date"]).group_by("symbol").agg(
-        pl.col("signal").last(),
-        pl.col("weight").last(),
+    latest = (
+        signals.sort(["symbol", "date"])
+        .group_by("symbol")
+        .agg(
+            pl.col("signal").last(),
+            pl.col("weight").last(),
+        )
     )
     weights = {}
     for record in latest.iter_rows(named=True):
@@ -137,7 +142,7 @@ async def run_resolved_config(resolved):
         return result
 
     brokers = resolved_brokers(resolved)
-    router = build_order_router(resolved)
+    router = OrderRouter(brokers)
     syncer = PositionSync()
     target_weights = _target_weights_from_signals(result.signals)
     orders, live_snapshot = await sync_positions(config, syncer, brokers, target_weights, featured)

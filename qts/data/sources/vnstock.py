@@ -15,6 +15,7 @@ Fundamentals are stored in a tidy long-format cache:
 
 from __future__ import annotations
 
+import calendar
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -23,7 +24,7 @@ import polars as pl
 
 from qts.core.errors import DataSourceError
 from qts.core.registry import Registry
-from qts.data._schemas import OHLCV_COLUMNS, DataType
+from qts.data._schemas import FUTURES_INTRADAY_OHLCV_COLUMNS, OHLCV_COLUMNS, DataType
 from qts.data.base import BaseDataSource
 from qts.data.vn_symbols import strip_vn_prefix
 from qts.utils.paths import cache_dir
@@ -61,6 +62,17 @@ _EMPTY_OHLCV_SCHEMA = {
     "close": pl.Float64,
     "volume": pl.Float64,
 }
+_EMPTY_INTRADAY_OHLCV_SCHEMA = {
+    "bar_time": pl.Datetime,
+    "date": pl.Date,
+    "symbol": pl.Utf8,
+    "interval": pl.Utf8,
+    "open": pl.Float64,
+    "high": pl.Float64,
+    "low": pl.Float64,
+    "close": pl.Float64,
+    "volume": pl.Float64,
+}
 
 # Tidy long-format schema for all financial statements.
 _FUNDAMENTALS_SCHEMA: dict[str, type[pl.DataType]] = {
@@ -83,6 +95,10 @@ _FUNDAMENTALS_CACHE_TTL_HOURS = 24
 
 def _to_kbs_interval(interval: str) -> str:
     return _INTERVAL_SUFFIX.get(interval.lower(), "day")
+
+
+def _is_intraday_interval(interval: str) -> bool:
+    return _to_kbs_interval(interval) in _INTRADAY_SUFFIXES
 
 
 _INDEX_SYMBOLS = frozenset({
@@ -129,24 +145,61 @@ def _to_krx_futures(raw: str) -> str:
     return f"41{u_code}{y_code}{m_code}000"
 
 
-def _rows_to_ohlcv(symbol: str, rows: list[dict], scale: float) -> pl.DataFrame:
+def _third_thursday(year: int, month: int) -> date:
+    weeks = calendar.monthcalendar(year, month)
+    thursdays = [week[calendar.THURSDAY] for week in weeks if week[calendar.THURSDAY]]
+    return date(year, month, thursdays[2])
+
+
+def _front_month_contract(as_of: date) -> str:
+    year = as_of.year
+    month = as_of.month
+    if as_of > _third_thursday(year, month):
+        month += 1
+        if month == 13:
+            month = 1
+            year += 1
+    return f"VN30F{year % 100:02d}{month:02d}"
+
+
+def _to_kbs_futures_symbol(raw: str, as_of: date) -> str:
+    if raw.upper() == "VN30F1M":
+        # KBS serves concrete contracts, not DNSE-style rolling aliases.
+        return _to_krx_futures(_front_month_contract(as_of))
+    return _to_krx_futures(raw)
+
+
+def _parse_bar_time(raw_t) -> datetime:
+    if isinstance(raw_t, str):
+        return datetime.fromisoformat(raw_t[:19])
+    return datetime.fromtimestamp(raw_t)
+
+
+def _rows_to_ohlcv(
+    symbol: str,
+    rows: list[dict],
+    scale: float,
+    *,
+    interval: str = "1d",
+    include_bar_time: bool = False,
+) -> pl.DataFrame:
     if not rows:
-        return pl.DataFrame(schema=_EMPTY_OHLCV_SCHEMA)
+        return pl.DataFrame(
+            schema=_EMPTY_INTRADAY_OHLCV_SCHEMA if include_bar_time else _EMPTY_OHLCV_SCHEMA
+        )
+    bar_times: list[datetime] = []
     dates: list[date] = []
     opens, highs, lows, closes, volumes = [], [], [], [], []
     for r in rows:
-        raw_t = r["t"]
-        if isinstance(raw_t, str):
-            dt = date.fromisoformat(raw_t[:10])
-        else:
-            dt = date.fromtimestamp(raw_t)
-        dates.append(dt)
+        bar_time = _parse_bar_time(r["t"])
+        bar_times.append(bar_time)
+        dates.append(bar_time.date())
         opens.append(float(r["o"]) / scale)
         highs.append(float(r["h"]) / scale)
         lows.append(float(r["l"]) / scale)
         closes.append(float(r["c"]) / scale)
         volumes.append(float(r["v"]))
-    return pl.DataFrame({
+    payload = {
         "date": dates,
         "symbol": [symbol] * len(rows),
         "open": opens,
@@ -154,7 +207,20 @@ def _rows_to_ohlcv(symbol: str, rows: list[dict], scale: float) -> pl.DataFrame:
         "low": lows,
         "close": closes,
         "volume": volumes,
-    })
+    }
+    if include_bar_time:
+        payload = {
+            "bar_time": bar_times,
+            "date": dates,
+            "symbol": [symbol] * len(rows),
+            "interval": [interval] * len(rows),
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": volumes,
+        }
+    return pl.DataFrame(payload)
 
 
 def _parse_financial_page(
@@ -510,7 +576,15 @@ class VnstockFuturesDataSource(BaseDataSource):
                 raise DataSourceError(
                     "Unknown vnstock futures symbol", symbol, (start, end)
                 ) from exc
-            frame = frame.select(OHLCV_COLUMNS)
+            if "interval" in frame.columns:
+                frame = frame.filter(pl.col("interval") == interval)
+            columns = (
+                FUTURES_INTRADAY_OHLCV_COLUMNS
+                if _is_intraday_interval(interval)
+                and set(FUTURES_INTRADAY_OHLCV_COLUMNS) <= set(frame.columns)
+                else OHLCV_COLUMNS
+            )
+            frame = frame.select(columns)
             if start is None or end is None:
                 return frame
             return frame.filter(pl.col("date").is_between(start, end))
@@ -521,7 +595,7 @@ class VnstockFuturesDataSource(BaseDataSource):
             )
         try:
             rows = self._client.get_ohlcv(
-                symbol=_to_krx_futures(strip_vn_prefix(symbol)),
+                symbol=_to_kbs_futures_symbol(strip_vn_prefix(symbol), end),
                 start=start,
                 end=end,
                 interval=interval,
@@ -529,7 +603,13 @@ class VnstockFuturesDataSource(BaseDataSource):
             )
         except Exception as exc:
             raise DataSourceError(str(exc), symbol, (start, end)) from exc
-        return _rows_to_ohlcv(symbol, rows, scale=1.0)
+        return _rows_to_ohlcv(
+            symbol,
+            rows,
+            scale=1.0,
+            interval=interval,
+            include_bar_time=_is_intraday_interval(interval),
+        )
 
     async def get_fundamentals(self, symbol: str) -> pl.DataFrame:
         raise NotImplementedError("vnstock futures fundamentals are not supported.")

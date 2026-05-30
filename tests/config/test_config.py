@@ -38,7 +38,9 @@ def test_load_typed_configs(config_dir):
 def test_missing_brokers_raises(config_dir):
     path = config_dir / "bad_live.yaml"
     path.write_text(
-        (config_dir / "live.yaml").read_text().replace(
+        (config_dir / "live.yaml")
+        .read_text()
+        .replace(
             "brokers:\n  stock: moomoo\n  crypto: binance\n",
             "",
         )
@@ -93,7 +95,7 @@ features:
 strategy:
   type: factor
   params: {}
-backtest_engine: fast
+backtest_engine: vectorbt
 """
     )
     config = load_config(path)
@@ -159,43 +161,6 @@ def test_backtest_config_and_features_defaults():
     features = FeaturesConfig(indicators=[IndicatorConfig("rsi", {"periods": [14]})])
     assert features.indicators[0].name == "rsi"
     assert features.indicators[0].params == {"periods": [14]}
-
-
-def test_loader_normalizes_legacy_engine_aliases(config_dir):
-    legacy = config_dir / "legacy_engines.yaml"
-    legacy.write_text(
-        """
-workflow: research
-asset_types: [stock]
-universe:
-  stock: [AAPL]
-start_date: "2024-01-01"
-end_date: "2024-03-20"
-initial_capital: 100000
-data_sources:
-  stock: fmp
-storage: duckdb
-features:
-  technical: false
-  fundamental: false
-  onchain: false
-strategy:
-  type: factor
-  params: {}
-backtest_engine: fast
-"""
-    )
-    vectorbt = load_config(legacy)
-    assert vectorbt.backtest_engine == "vectorbt"
-
-    legacy.write_text(
-        legacy.read_text().replace(
-            "backtest_engine: fast",
-            "backtest_engine: normal",
-        )
-    )
-    zipline = load_config(legacy)
-    assert zipline.backtest_engine == "zipline"
 
 
 def test_loader_parses_indicator_list_and_train_window(config_dir):
@@ -306,8 +271,7 @@ def test_config_build_resolves_forward_returns_via_registry(config_dir, monkeypa
     monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))
     resolved = Config.build(config_dir / "research.yaml")
     assert any(
-        isinstance(feature, ForwardReturns)
-        for feature in resolved.feature_pipeline.features
+        isinstance(feature, ForwardReturns) for feature in resolved.feature_pipeline.features
     )
 
 
@@ -357,9 +321,7 @@ backtest_engine: vectorbt
 """
     )
     resolved = Config.build(path)
-    fundamentals = pl.DataFrame(
-        {"symbol": ["AAPL"], "pe_ratio": [21.5], "ev_ebitda": [15.2]}
-    )
+    fundamentals = pl.DataFrame({"symbol": ["AAPL"], "pe_ratio": [21.5], "ev_ebitda": [15.2]})
 
     bound_pipeline = resolved.with_fundamentals(fundamentals)
 
@@ -374,9 +336,7 @@ backtest_engine: vectorbt
 def test_feature_pipeline_with_fundamentals_returns_bound_copy():
     feature = FundamentalFeatures()
     pipeline = FeaturePipeline([feature])
-    fundamentals = pl.DataFrame(
-        {"symbol": ["AAPL"], "pe_ratio": [21.5], "ev_ebitda": [15.2]}
-    )
+    fundamentals = pl.DataFrame({"symbol": ["AAPL"], "pe_ratio": [21.5], "ev_ebitda": [15.2]})
 
     bound_pipeline = pipeline.with_fundamentals(fundamentals)
 
@@ -391,3 +351,4 @@ def test_package_bootstrap_registers_strategy_families():
     assert Registry.get_strategy("factor").__name__ == "FactorStrategy"
     assert Registry.get_strategy("ml_factor").__name__ == "MLFactorStrategy"
     assert Registry.get_strategy("stat_arb").__name__ == "StatArbStrategy"
+    assert Registry.get_strategy("vn100_quantamental").__name__ == "VN100QuantamentalStrategy"

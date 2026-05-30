@@ -6,15 +6,17 @@ Run with:  pytest tests/data/test_paper_dnse_data.py -v -s
 
 from __future__ import annotations
 
+import os
 from datetime import date
 
 import pytest
 from dotenv import load_dotenv
 
-from qts.data._schemas import DataType, OHLCV_COLUMNS
+from qts.data._schemas import FUTURES_INTRADAY_OHLCV_COLUMNS, OHLCV_COLUMNS, DataType
 from qts.data.sources.dnse import DNSEDataSource
 
 load_dotenv()
+pytestmark = pytest.mark.paper
 
 _START = date(2025, 1, 1)
 _END = date(2025, 3, 31)
@@ -22,6 +24,8 @@ _END = date(2025, 3, 31)
 
 @pytest.fixture(scope="module")
 def dnse() -> DNSEDataSource:
+    if not os.getenv("DNSE_API_KEY") or not os.getenv("DNSE_API_SECRET"):
+        pytest.skip("DNSE_API_KEY and DNSE_API_SECRET are required for DNSE paper data tests")
     return DNSEDataSource.from_env()
 
 
@@ -82,3 +86,21 @@ async def test_dnse_intraday_resolution(dnse):
     if result.height > 0:
         print(result.head(5))
     assert result.columns == OHLCV_COLUMNS
+
+
+@pytest.mark.asyncio
+async def test_dnse_vn_futures_intraday_timeframes(dnse):
+    """VN30 front-month futures intraday bars preserve interval and bar_time."""
+    for interval in ("1h", "15m", "30m"):
+        result = await dnse.get_ohlcv(
+            "VNF:VN30F1M",
+            date(2025, 3, 3),
+            date(2025, 3, 3),
+            interval,
+        )
+        print(f"\n[VN_FUTURES intraday] VNF:VN30F1M {interval} rows={result.height}")
+        if result.height > 0:
+            print(result.head(5))
+        assert result.columns == FUTURES_INTRADAY_OHLCV_COLUMNS
+        assert (result["symbol"] == "VNF:VN30F1M").all()
+        assert (result["interval"] == interval).all()

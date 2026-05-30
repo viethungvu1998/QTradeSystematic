@@ -9,55 +9,46 @@ from typing import Any
 import polars as pl
 
 from qts.core.registry import Registry
-from qts.research.backtest.base import (
-    BacktestConfig,
-    BacktestResult,
-    CommissionConfig,
-    UniverseConfig,
-)
-from qts.research.backtest._runner import run_backtest_frame
-from qts.research.strategies.factor.base import BaseFactorStrategy
 
+from .base import BaseVN100QuantamentalStrategy
 from .config import MODEL_PARAMS, ExperimentConfig, FeatureConfig
 from .features import build_model_frame
 from .signals import choose_predictors, walk_forward_ml_signals
 
-
-_SWEEP_REBALANCE_PERIODS: list[int] = [10, 21, 63]  # bi-weekly, monthly, quarterly
+_SWEEP_REBALANCE_PERIODS: list[int] = [10, 21, 63]
 
 
 @Registry.register_strategy("vn100_quantamental")
-class VN100QuantamentalStrategy(BaseFactorStrategy):
-    """Walk-forward ML factor strategy for the VN100 universe.
-
-    Builds quantamental features (QSMOM + technicals + fundamentals), trains an
-    XGBoost regressor on rolling windows, and produces long-only signals.
-    """
+class VN100QuantamentalStrategy(BaseVN100QuantamentalStrategy):
+    """Walk-forward ML factor strategy for the VN100 universe."""
 
     def __init__(self, experiment: ExperimentConfig) -> None:
         self.experiment = experiment
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
-        """Generate walk-forward ML signals from a fully-featured model frame.
-
-        ``data`` must already have been processed through ``build_model_frame``.
-        """
         target_col = f"forward_return_{self.experiment.feature.forward_period}"
         if target_col not in data.columns:
             return self.empty_signal_frame()
 
-        predictor_cols = choose_predictors(data, self.experiment.feature, self.experiment.predictor_cols)
+        predictor_cols = choose_predictors(
+            data,
+            self.experiment.feature,
+            self.experiment.predictor_cols,
+        )
         if not predictor_cols:
             return self.empty_signal_frame()
 
         return walk_forward_ml_signals(data, self.experiment, predictor_cols, target_col)
 
     def run_experiment(self, raw_ohlcv: pl.DataFrame) -> dict[str, Any]:
-        """Full pipeline: feature engineering → walk-forward signals → backtest.
+        from qts.research.backtest._runner import run_backtest_frame
+        from qts.research.backtest.base import (
+            BacktestConfig,
+            BacktestResult,
+            CommissionConfig,
+            UniverseConfig,
+        )
 
-        Returns a dict with keys: result, model_frame, feature_diagnostics,
-        signals, predictor_cols, target_col, factor_sources.
-        """
         model_frame, factor_source_map, diagnostics = build_model_frame(
             raw_ohlcv,
             self.experiment.feature,
@@ -86,7 +77,7 @@ class VN100QuantamentalStrategy(BaseFactorStrategy):
             commission=CommissionConfig(model="percentage", rate=Decimal("0.0015")),
             calendar="XHOSE",
         )
-        result = run_backtest_frame(
+        result: BacktestResult = run_backtest_frame(
             engine_name="notebook_walk_forward",
             strategy=self,
             data=model_frame,
@@ -106,6 +97,7 @@ class VN100QuantamentalStrategy(BaseFactorStrategy):
 
 def make_sweep_arms(base: ExperimentConfig) -> list[ExperimentConfig]:
     """Enumerate hyperparameter sweep arms from a base experiment config."""
+
     arms: list[ExperimentConfig] = []
     for top_n, fast, slow, num_long, depth, n_estimators, rebal in product(
         [50, 80],
@@ -152,7 +144,4 @@ def make_sweep_arms(base: ExperimentConfig) -> list[ExperimentConfig]:
     return arms
 
 
-__all__ = [
-    "VN100QuantamentalStrategy",
-    "make_sweep_arms",
-]
+__all__ = ["VN100QuantamentalStrategy", "make_sweep_arms"]

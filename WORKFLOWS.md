@@ -75,7 +75,7 @@ Runtime path:
 4. the configured backtest engine generates a `BacktestResult`
 5. the latest signal row per symbol is converted into target weights
 6. `PositionSync` computes delta orders from broker positions and account value
-7. `build_order_router()` assembles the live broker map from `ResolvedConfig`
+7. `OrderRouter` is assembled from the resolved broker map
 8. `OrderRouter` dispatches orders concurrently
 9. the flow returns a dict with:
    - `result`
@@ -93,6 +93,7 @@ Current live-mode caveats:
 ## 4. Data Refresh
 
 `data_fetch_flow()` is the data-only flow.
+`download_vn_futures_intraday_ohlcv()` is the task-level helper for the configured VN futures universe and fetches `1h`, `15m`, and `30m` bars by default. Use `vnstock_futures` for the KBS public source when DNSE credentials or geography are not available; the adapter keeps `VNF:VN30F1M` as the QTS-facing symbol and requests the concrete KBS front-month contract internally.
 
 Signature:
 
@@ -107,6 +108,7 @@ Current behavior:
 - resolves symbols through the shared `requested_symbols()` helper
 - supports `stock`, `vn_stock`, `vn_warrant`, `vn_futures`, `crypto`, and `crypto_futures`
 - calls `manager.get(DataType(...), symbols, start=..., end=...)`
+- stores non-daily VN futures bars in `vn_futures_intraday_prices` with `bar_time` and `interval` so multiple timeframes do not collide
 
 Example:
 
@@ -116,6 +118,28 @@ import asyncio
 from qts.orchestration.flows.data_fetch_flow import data_fetch_flow
 
 asyncio.run(data_fetch_flow("examples/research_zipline.yaml", ["stock"], ["ohlcv"]))
+```
+
+VN30 front-month intraday example:
+
+```python
+import asyncio
+
+from qts.config.builder import Config
+from qts.orchestration.runtime import build_data_manager
+from qts.orchestration.tasks.data_tasks import download_vn_futures_intraday_ohlcv
+
+async def main():
+    resolved = Config.build("configs/data/vn30f1m_intraday.yaml")
+    manager = build_data_manager(resolved, include_bundle=False)
+    task_fn = getattr(
+        download_vn_futures_intraday_ohlcv,
+        "fn",
+        download_vn_futures_intraday_ohlcv,
+    )
+    await task_fn(resolved.raw, manager)
+
+asyncio.run(main())
 ```
 
 ## 5. Deployment Registration
@@ -161,7 +185,7 @@ universe:
 data_sources:
   stock: fmp | yahoo
   vn_stock: vnstock     # KBS public API — use dnse only from Vietnamese IP
-  vn_futures: vnstock_futures
+  vn_futures: vnstock_futures | dnse  # KBS-backed vnstock_futures is the default VN30F1M intraday source
   vn_warrant: vnstock   # with dnse, warrant-underlying requests expand to concrete codes such as VNW:CVNM2511
   crypto: binance
   crypto_futures: binance_futures
@@ -176,7 +200,7 @@ features:
 strategy:
   type: factor | ml_factor | stat_arb
   params: {}
-backtest_engine: vectorbt | zipline | fast | normal
+backtest_engine: vectorbt | zipline
 train_window: 252
 rebalance_frequency: monthly
 ```
@@ -196,7 +220,7 @@ slippage_model: fixed | volatility_scaled
 commission:
   model: percentage | per_trade
   rate: 0.001
-calendar: nyse | hkex | crypto
+calendar: nyse | hkex | hose | crypto
 promotion_gate:
   max_sharpe_degradation: 0.30
 ```

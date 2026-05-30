@@ -128,7 +128,7 @@ class CostAdjustedPortfolio(BasePortfolioConstructor):
 
 
 # ---------------------------------------------------------------------------
-# Functional API (backward-compatible wrappers)
+# Functional registry API
 # ---------------------------------------------------------------------------
 
 

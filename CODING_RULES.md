@@ -25,6 +25,9 @@ Asset type is inferred from symbol format by `AssetType.from_symbol()` — no ot
 
 | Symbol format | `AssetType` | Examples |
 |---|---|---|
+| Starts with `PERP:` | `CRYPTO_FUTURES` | `PERP:ETH/USDT` |
+| Starts with `VNF:` | `VN_FUTURES` | `VNF:VN30F2606` |
+| Starts with `VNW:` | `VN_WARRANT` | `VNW:CVNM2511` |
 | Contains `/` | `CRYPTO` | `BTC/USDT` |
 | Starts with `VN:` | `VN_STOCK` | `VN:VNM`, `VN:VIC` |
 | Starts with `CMX:` | `COMMODITY` | `CMX:CL`, `CMX:GC` |
@@ -111,6 +114,7 @@ async def get_fundamentals(self, symbol: str) -> pl.DataFrame
 - `CAPABILITIES` must be declared as a class attribute. `DataManager` builds its `(AssetType, DataType) → source` map from it at init — do not override `supports()`.
 - Output schema for each `DataType` is defined in `data/_schemas.py`.
 - OHLCV schema: `[date, symbol, open, high, low, close, volume]` — all sources must conform for `DataType.OHLCV`.
+- VN futures intraday storage schema: `[bar_time, date, symbol, interval, open, high, low, close, volume]`. Daily futures stay on the standard OHLCV schema.
 
 ### `BaseFeature`
 ```python
@@ -191,9 +195,11 @@ async def get_account_value(self) -> Decimal
 `execution/` never imports from `research/`. No layer imports from a layer to its right.
 
 Strategy architecture rules:
-- Family `base.py` and `core.py` files are allowed only when shared behavior already exists.
-- `factor/` and `stat_arb/` are the earned strategy families today; add shared logic there instead of duplicating it in concrete strategies.
-- Do not create empty `cross_sectional/base.py` or `cross_sectional/core.py` scaffolding until a concrete cross-sectional strategy exists.
+- Each concrete strategy family under `qts/research/strategies/` uses the same spine: `base.py` for the family interface, `factories.py` for registry side effects, and one concrete strategy per descriptive module.
+- Do not add compatibility import shims such as `model.py`, `strategy.py`, or `base_model.py`; concrete strategy logic belongs in descriptive modules such as `rank.py`, `classification.py`, `mean_reversion.py`, or `quantamental.py`.
+- Learning-based model objects expose `fit()` / `predict()` only. They do not implement `generate_signals()`; the strategy class owns signal generation.
+- Strategy packages do not own data loading. Data assembly and source-specific fetching belong in `qts/data/`, while strategies consume normalized frames.
+- Do not create empty family scaffolding until a concrete strategy exists.
 - `research/backtest/` holds shared engine/runtime code only. Diagnostics may live in strategy packages, but simulation orchestration stays in engines.
 
 ---

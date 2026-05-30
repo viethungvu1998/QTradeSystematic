@@ -20,7 +20,7 @@ import polars as pl
 
 from qts.core.errors import DataSourceError, DataSourceWarning
 from qts.core.registry import Registry
-from qts.data._schemas import OHLCV_COLUMNS, DataType
+from qts.data._schemas import FUTURES_INTRADAY_OHLCV_COLUMNS, OHLCV_COLUMNS, DataType
 from qts.data.base import BaseDataSource
 from qts.data.vn_symbols import (
     is_vn_warrant_code,
@@ -44,6 +44,7 @@ _RESOLUTION_MAP: dict[str, str] = {
     "1d": "1D",
     "1w": "1W",
 }
+_INTRADAY_INTERVALS = frozenset({"1m", "3m", "5m", "15m", "30m", "1h"})
 
 _EMPTY_SCHEMA = {
     "date": pl.Date,
@@ -54,10 +55,25 @@ _EMPTY_SCHEMA = {
     "close": pl.Float64,
     "volume": pl.Float64,
 }
+_EMPTY_INTRADAY_SCHEMA = {
+    "bar_time": pl.Datetime,
+    "date": pl.Date,
+    "symbol": pl.Utf8,
+    "interval": pl.Utf8,
+    "open": pl.Float64,
+    "high": pl.Float64,
+    "low": pl.Float64,
+    "close": pl.Float64,
+    "volume": pl.Float64,
+}
 
 
 def _to_dnse_resolution(interval: str) -> str:
     return _RESOLUTION_MAP.get(interval.lower(), "1D")
+
+
+def _is_intraday_interval(interval: str) -> bool:
+    return interval.lower() in _INTRADAY_INTERVALS
 
 
 def _to_dnse_symbol(symbol: str) -> str:
@@ -143,7 +159,13 @@ def _build_signature_header(
     return header
 
 
-def _columnar_to_frame(symbol: str, pages: list[dict]) -> pl.DataFrame:
+def _columnar_to_frame(
+    symbol: str,
+    pages: list[dict],
+    *,
+    interval: str = "1d",
+    include_bar_time: bool = False,
+) -> pl.DataFrame:
     """Merge DNSE columnar pages {t,o,h,l,c,v} into canonical OHLCV DataFrame."""
     t_all: list = []
     o_all: list[float] = []
@@ -159,8 +181,11 @@ def _columnar_to_frame(symbol: str, pages: list[dict]) -> pl.DataFrame:
         c_all.extend(float(x) for x in (page.get("c") or []))
         v_all.extend(float(x) for x in (page.get("v") or []))
     if not t_all:
-        return pl.DataFrame(schema=_EMPTY_SCHEMA)
-    return pl.DataFrame({
+        return pl.DataFrame(
+            schema=_EMPTY_INTRADAY_SCHEMA if include_bar_time else _EMPTY_SCHEMA
+        )
+    bar_times = [datetime.fromtimestamp(ts, tz=UTC).replace(tzinfo=None) for ts in t_all]
+    payload = {
         "date": [datetime.fromtimestamp(ts, tz=UTC).date() for ts in t_all],
         "symbol": [symbol] * len(t_all),
         "open": o_all,
@@ -168,7 +193,20 @@ def _columnar_to_frame(symbol: str, pages: list[dict]) -> pl.DataFrame:
         "low": l_all,
         "close": c_all,
         "volume": v_all,
-    })
+    }
+    if include_bar_time:
+        payload = {
+            "bar_time": bar_times,
+            "date": [bar_time.date() for bar_time in bar_times],
+            "symbol": [symbol] * len(t_all),
+            "interval": [interval] * len(t_all),
+            "open": o_all,
+            "high": h_all,
+            "low": l_all,
+            "close": c_all,
+            "volume": v_all,
+        }
+    return pl.DataFrame(payload)
 
 
 def _warn_if_truncated_futures_history(
@@ -284,7 +322,12 @@ class _DNSEClient:
         self._warrant_index = warrants
         return warrants
 
-    def resolve_warrant_symbols(self, underlying_symbol: str, *, as_of: date | None = None) -> list[str]:
+    def resolve_warrant_symbols(
+        self,
+        underlying_symbol: str,
+        *,
+        as_of: date | None = None,
+    ) -> list[str]:
         as_of = as_of or datetime.now(UTC).date()
         prefix = f"C{underlying_symbol.upper()}"
         matches = [
@@ -361,7 +404,7 @@ class DNSEDataSource(BaseDataSource):
         interval: str,
     ) -> pl.DataFrame:
         if self._client is None:
-            frame = self._fixture_frame(symbol)
+            frame = self._fixture_frame(symbol, interval)
             _warn_if_truncated_futures_history(symbol, start, frame)
             if start is None or end is None:
                 return frame
@@ -387,11 +430,17 @@ class DNSEDataSource(BaseDataSource):
             raise DataSourceError(str(exc), symbol, (start, end)) from exc
         except Exception as exc:
             raise DataSourceError(str(exc), symbol, (start, end)) from exc
-        frame = _columnar_to_frame(output_symbol, pages)
+        frame = _columnar_to_frame(
+            output_symbol,
+            pages,
+            interval=interval,
+            include_bar_time=output_symbol.startswith("VNF:")
+            and _is_intraday_interval(interval),
+        )
         _warn_if_truncated_futures_history(output_symbol, start, frame)
         return frame
 
-    def _fixture_frame(self, symbol: str) -> pl.DataFrame:
+    def _fixture_frame(self, symbol: str, interval: str) -> pl.DataFrame:
         candidate_symbols = [symbol]
         if symbol.startswith("VNF:"):
             candidate_symbols.append(to_vn_futures_symbol(symbol))
@@ -404,7 +453,16 @@ class DNSEDataSource(BaseDataSource):
             frame = self.ohlcv_payloads.get(candidate)
             if frame is None:
                 continue
-            frame = frame.select(OHLCV_COLUMNS)
+            if symbol.startswith("VNF:") and "interval" in frame.columns:
+                frame = frame.filter(pl.col("interval") == interval)
+            columns = (
+                FUTURES_INTRADAY_OHLCV_COLUMNS
+                if symbol.startswith("VNF:")
+                and _is_intraday_interval(interval)
+                and set(FUTURES_INTRADAY_OHLCV_COLUMNS) <= set(frame.columns)
+                else OHLCV_COLUMNS
+            )
+            frame = frame.select(columns)
             if symbol.startswith("VNF:"):
                 frame = frame.with_columns(pl.lit(to_vn_futures_symbol(symbol)).alias("symbol"))
             return frame

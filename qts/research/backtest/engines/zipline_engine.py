@@ -12,7 +12,7 @@ import polars as pl
 
 from qts.core.instrument import AssetType
 from qts.core.registry import Registry
-from qts.research.backtest._runner import run_backtest_frame, walk_forward_signals
+from qts.research.backtest._runner import walk_forward_signals
 from qts.research.backtest.base import (
     BacktestConfig,
     BacktestResult,
@@ -27,28 +27,6 @@ from qts.research.backtest.zipline_observability import zipline_observability
 from qts.research.strategies.base import BaseStrategy
 from qts.research.strategies.stat_arb.base import BaseStatArbStrategy
 
-
-@Registry.register_engine("normal")
-class ZiplineEngine(BaseEngine):
-    """Legacy sequential engine kept for compatibility with older tests."""
-
-    def run(
-        self,
-        strategy: BaseStrategy,
-        data: pl.DataFrame,
-        config: BacktestConfig,
-        *,
-        pipeline=None,
-        ohlcv: pl.DataFrame | None = None,
-    ) -> BacktestResult:
-        prebuilt = (
-            walk_forward_signals(pipeline, strategy, ohlcv, config)
-            if pipeline is not None and ohlcv is not None
-            else None
-        )
-        return run_backtest_frame("zipline", strategy, data, config, prebuilt_signals=prebuilt)
-
-
 CRYPTO_CALENDAR = "24/7"
 _CRYPTO_CALENDAR_ALIASES = {"24/7", "24x7", "always_open", "crypto"}
 _MIN_SYNTHETIC_UNITS = 100.0
@@ -58,7 +36,9 @@ _ZIPLINE_OHLC_COLUMNS = ("open", "high", "low", "close")
 
 
 def _zipline_symbol_name(symbol: str) -> str:
-    base = "".join(character if character.isalnum() else "_" for character in symbol.upper()).strip("_")
+    base = "".join(character if character.isalnum() else "_" for character in symbol.upper()).strip(
+        "_"
+    )
     if not base or not base[0].isalpha():
         base = f"ASSET_{base}"
     digest = hashlib.md5(symbol.encode(), usedforsecurity=False).hexdigest()[:8].upper()
@@ -124,7 +104,9 @@ def _build_price_scale_map(
     target_schedule,
     config: BacktestConfig,
 ) -> dict[str, float]:
-    open_wide = _pivot_wide(data, "open").reindex(target_schedule.targets.index, columns=target_schedule.targets.columns)
+    open_wide = _pivot_wide(data, "open").reindex(
+        target_schedule.targets.index, columns=target_schedule.targets.columns
+    )
     target_deltas = target_schedule.targets.diff().fillna(target_schedule.targets).abs()
     capital = float(config.initial_capital or 100000)
     scale_map: dict[str, float] = {}
@@ -135,7 +117,11 @@ def _build_price_scale_map(
             continue
 
         prices = open_wide[symbol].replace(0.0, pd.NA).ffill().bfill()
-        units = (target_deltas[symbol] * capital / prices).replace([math.inf, -math.inf], pd.NA).dropna()
+        units = (
+            (target_deltas[symbol] * capital / prices)
+            .replace([math.inf, -math.inf], pd.NA)
+            .dropna()
+        )
         units = units[units > 0]
         if units.empty:
             scale_map[symbol] = 1.0
@@ -235,7 +221,9 @@ def build_zipline_preflight_report(
 
         row_count = int(len(symbol_rows))
         aligned_row_count = int(len(aligned_rows))
-        calendar_loss_ratio = 0.0 if row_count == 0 else float((row_count - aligned_row_count) / row_count)
+        calendar_loss_ratio = (
+            0.0 if row_count == 0 else float((row_count - aligned_row_count) / row_count)
+        )
         rows.append(
             {
                 "symbol": symbol,
@@ -246,7 +234,9 @@ def build_zipline_preflight_report(
                 "max_scaled_price": float(adjusted_rows[list(_ZIPLINE_OHLC_COLUMNS)].max().max())
                 if not adjusted_rows.empty
                 else 0.0,
-                "max_scaled_volume": float(adjusted_rows["volume"].max()) if not adjusted_rows.empty else 0.0,
+                "max_scaled_volume": float(adjusted_rows["volume"].max())
+                if not adjusted_rows.empty
+                else 0.0,
                 "price_overflow_rows": int(price_overflow_mask.sum()),
                 "volume_overflow_rows": int(volume_overflow_mask.sum()),
                 "valid_for_zipline": not failures,
@@ -307,7 +297,9 @@ def _perf_to_result(
     equity_series = perf["portfolio_value"].astype(float)
     if shift_to_previous_session:
         if trading_calendar is None:
-            raise ValueError("trading_calendar is required when shifting dates to the previous session")
+            raise ValueError(
+                "trading_calendar is required when shifting dates to the previous session"
+            )
         dates = _shift_dates_to_previous_session(perf.index, trading_calendar)
     else:
         dates = [timestamp.date() for timestamp in perf.index]
@@ -402,13 +394,21 @@ class ZiplineReloadedEngine(BaseEngine):
             )
             if initial_report is None:
                 initial_report = report
-            filtered_symbols = sorted(filtered_data["symbol"].unique().to_list()) if not filtered_data.is_empty() else []
+            filtered_symbols = (
+                sorted(filtered_data["symbol"].unique().to_list())
+                if not filtered_data.is_empty()
+                else []
+            )
             current_symbols = sorted(current_data["symbol"].unique().to_list())
             if not filtered_symbols:
-                self.last_preflight_report = initial_report if initial_report is not None else report
+                self.last_preflight_report = (
+                    initial_report if initial_report is not None else report
+                )
                 return empty_backtest_result(engine_name="zipline", signals=filtered_signals)
             if filtered_symbols == current_symbols:
-                self.last_preflight_report = initial_report if initial_report is not None else report
+                self.last_preflight_report = (
+                    initial_report if initial_report is not None else report
+                )
                 data = filtered_data
                 signals = filtered_signals
                 symbols = filtered_symbols
@@ -421,10 +421,13 @@ class ZiplineReloadedEngine(BaseEngine):
 
         zipline_data = data.with_columns(pl.col("symbol").replace(symbol_map))
 
-        bundle_name = "qts_" + hashlib.md5(
-            json.dumps({"calendar": calendar_name, "symbols": symbols}).encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:8]
+        bundle_name = (
+            "qts_"
+            + hashlib.md5(
+                json.dumps({"calendar": calendar_name, "symbols": symbols}).encode(),
+                usedforsecurity=False,
+            ).hexdigest()[:8]
+        )
         adapter = ZiplineBundleAdapter(root=bundle_dir())
         start = config.start_date or data["date"].min()
         end = config.end_date or data["date"].max()
@@ -463,7 +466,11 @@ class ZiplineReloadedEngine(BaseEngine):
             rate = float(config.commission.rate) if config.commission else 0.001
             slippage_bps = _extract_slippage_bps(config)
             set_commission(us_equities=zlc.PerDollar(cost=rate))
-            set_slippage(us_equities=zls.FixedBasisPointsSlippage(basis_points=slippage_bps, volume_limit=1.0))
+            set_slippage(
+                us_equities=zls.FixedBasisPointsSlippage(
+                    basis_points=slippage_bps, volume_limit=1.0
+                )
+            )
             rule = {
                 "daily": date_rules.every_day(),
                 "weekly": date_rules.week_start(),

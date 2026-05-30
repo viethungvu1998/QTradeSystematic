@@ -5,6 +5,17 @@ from __future__ import annotations
 from enum import StrEnum
 
 OHLCV_COLUMNS = ["date", "symbol", "open", "high", "low", "close", "volume"]
+FUTURES_INTRADAY_OHLCV_COLUMNS = [
+    "bar_time",
+    "date",
+    "symbol",
+    "interval",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+]
 
 
 class DataType(StrEnum):

@@ -1,8 +1,10 @@
-"""Tests for strategies.ml_factor.model."""
+"""Tests for strategies.ml_factor.classification."""
 
 from __future__ import annotations
 
+import sys
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -10,16 +12,22 @@ import polars as pl
 import pytest
 
 from qts.core.registry import Registry
-from qts.research.strategies.ml_factor.model import (
+from qts.research.strategies.ml_factor.classification import MLFactorStrategy
+from qts.research.strategies.ml_factor.constants import (
     CLASS_PERCENTILES,
+    ML_FACTOR_CLASS_COUNT,
     ML_FACTOR_CLASS_SCORES,
+)
+from qts.research.strategies.ml_factor.labels import (
     MLFactorClass,
     MLFactorClassThresholds,
-    MLFactorStrategy,
     class_scores_from_probabilities,
-    classification_metrics,
+)
+from qts.research.strategies.ml_factor.models.xgb import (
+    XGBClassifierModel,
     train_and_predict_xgb_classifier,
 )
+from qts.utils.metrics import multiclass_classification_metrics
 
 _SIGNAL_COLS = {"date", "symbol", "signal", "weight"}
 _PREDICTOR_COLS = ["f1", "f2", "f3"]
@@ -163,9 +171,7 @@ def test_strategy_uses_sklearn_time_series_split_last_fold(ml_df):
         .to_pandas()
     )
     dates = pd.DatetimeIndex(pd.to_datetime(trainable["date"]).unique()).sort_values()
-    train_idx, test_idx = list(
-        TimeSeriesSplit(n_splits=3, gap=2, test_size=5).split(dates)
-    )[-1]
+    train_idx, test_idx = list(TimeSeriesSplit(n_splits=3, gap=2, test_size=5).split(dates))[-1]
     expected_train_dates = pd.DatetimeIndex(dates[train_idx]).sort_values()
     expected_test_dates = pd.DatetimeIndex(dates[test_idx]).sort_values()
 
@@ -238,7 +244,11 @@ def test_class_scores_from_probabilities_shape_and_classes():
     probabilities = np.eye(5)
 
     scores = class_scores_from_probabilities(probabilities)
-    metrics = classification_metrics(np.arange(5), np.arange(5))
+    metrics = multiclass_classification_metrics(
+        np.arange(5),
+        np.arange(5),
+        num_classes=ML_FACTOR_CLASS_COUNT,
+    )
 
     assert scores.shape == (5,)
     assert scores.tolist() == pytest.approx(ML_FACTOR_CLASS_SCORES.tolist())
@@ -300,6 +310,32 @@ def test_xgb_classifier_handles_missing_training_classes():
 
     assert scores.shape == (3,)
     assert np.isfinite(scores).all()
+
+
+def test_xgb_classifier_uses_supplied_params_without_hidden_defaults(monkeypatch):
+    captured_params = {}
+
+    class FakeXGBClassifier:
+        def __init__(self, **params):
+            captured_params.update(params)
+
+        def fit(self, features, target):
+            return None
+
+    monkeypatch.setitem(sys.modules, "xgboost", SimpleNamespace(XGBClassifier=FakeXGBClassifier))
+    model = XGBClassifierModel(n_estimators=7, learning_rate=0.03, n_jobs=1)
+    features = pd.DataFrame({"f1": np.arange(8, dtype=float)})
+    target = pd.Series(np.linspace(-0.2, 0.2, 8), name=_TARGET_COL)
+
+    model.fit(features, target)
+
+    assert captured_params == {
+        "n_estimators": 7,
+        "learning_rate": 0.03,
+        "n_jobs": 1,
+        "objective": "multi:softprob",
+        "num_class": 5,
+    }
 
 
 def test_ml_factor_registered():

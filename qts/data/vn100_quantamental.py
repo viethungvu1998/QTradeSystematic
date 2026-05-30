@@ -1,9 +1,9 @@
-"""Data loading and fetching for the VN100 quantamental strategy."""
+"""Data loading for VN100 quantamental workflows."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 import yaml
@@ -13,8 +13,6 @@ from qts.data.sources.vnstock import VnstockDataSource
 from qts.data.storage.duckdb import DuckDBStorage
 from qts.data.storage.parquet import ParquetStorage
 from qts.utils.paths import cache_dir
-
-from datetime import date
 
 
 def normalize_vn_symbol(symbol: str, prefix: str = "VN:") -> str:

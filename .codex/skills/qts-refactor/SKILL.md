@@ -1,73 +1,45 @@
 ---
 name: qts-refactor
-description: Deeply refactor QTradeSystematic Python and YAML code so it complies with `QTradeSystematic/CODING_RULES.md`, stays feature-complete, becomes lighter-weight, and keeps polymorphism at the real extension points. Use for architecture cleanup, simplification, adapter isolation, dependency injection, registry/plugin migration, strategy-engine seam fixes, flow/config cleanup, and repo-specific compliance reviews.
+description: Use when refactoring QTradeSystematic to remove navigation tax, compatibility shims, pass-through modules, duplicate helpers, one-use abstractions, stale public import paths, and speculative layers while preserving earned architecture seams and verified behavior.
 ---
 
 # QTS Refactor
 
-Use this skill when the task is to refactor existing QTradeSystematic code to match the repo's architecture guide. Treat "refactor" as a deep refactor by default: preserve features, reduce weight, simplify control flow, and keep polymorphism only where it carries real architectural value. Start by reading `QTradeSystematic/CODING_RULES.md`, the target files, and the closest owning abstractions before editing.
+Read the QTradeSystematic codebase carefully and identify unnecessary "navigation tax": compatibility shims, pass-through modules, wrapper files, duplicate helpers, one-use abstractions, speculative layers, stale public import paths, and modules that only exist to preserve backward compatibility.
 
-## Workflow
+I explicitly allow breaking backward compatibility if it makes the codebase smaller, clearer, and more direct. Prefer the minimal current architecture over legacy import paths.
 
-1. Build context
-- Read the target files plus the nearest `Base*` contract, registry entrypoint, config builder, and tests.
-- For broad cleanup or review requests, also read [references/refactor-checklist.md](references/refactor-checklist.md).
-- If the change touches orchestration or YAML, inspect the registered component being configured before editing the flow.
+Use the repo rules in AGENTS.md, CODING_RULES.md, ARCHITECTURE.md, and WORKFLOWS.md, but prioritize removing unnecessary layers where the rules permit it.
 
-2. Diagnose rule violations
-- Remove forbidden imports from reference systems such as `omega`, `qsconnect`, `qsresearch`, and `qsautomate`.
-- Keep vendor libraries behind adapters only. No direct `futu-api`, `binance-connector`, `vectorbtpro`, `zipline`, or `prefect` imports outside the owning adapter module.
-- Replace inline asset-type branching with registry or router dispatch keyed by `AssetType.from_symbol(symbol)`.
-- Replace concrete instantiation in consumers with dependency injection or registry lookup.
-- Preserve the public seams: strategies expose `BaseStrategy.generate_signals(data)` and engines expose `BaseEngine.run(...)`.
-- Remove hardcoded asset types, engines, brokers, commissions, schedules, and constructors from orchestration when config or registry seams already exist.
-- Enforce module boundaries and the repo typing rules.
-- Identify code weight that does not earn its complexity: pass-through wrappers, duplicate helpers, one-off abstractions, dead extension points, and conditionals that should become a shared polymorphic seam.
+Scope:
+- Inspect the whole codebase, especially `qts/research/strategies/`, `qts/config/`, `qts/orchestration/`, and tests.
+- Do not import from or depend on `reference/`; it is design reference only.
+- Do not touch live broker behavior or add paper/live API calls.
+- Do not invent new strategy logic, signal rules, risk rules, schema changes, or broker behavior.
+- It is okay to update tests/configs/notebooks to the new canonical paths.
+- It is okay to delete old compatibility tests if they only protect legacy import paths.
 
-3. Refactor with the preferred patterns
-- For a new broker, engine, feature, strategy, or data source: extend the relevant ABC, register it with a lowercase key, and reference the key from YAML.
-- For asset-specific behavior: derive the asset type once from the symbol and hand off to a registry or router. Do not pattern-match raw symbols elsewhere.
-- For strategy cleanup: move shared helpers to the base class or an earned family module instead of adding strategy-specific backtest runners.
-- For feature cleanup: append columns only, keep per-symbol logic inside `.over("symbol")`, and preserve the input schema.
-- For orchestration cleanup: wire dependencies from config and registry rather than constructing concrete implementations inline.
-- For credentials: read env vars inside adapter `connect()` paths and keep secrets out of code and YAML.
-- Prefer deleting code over moving code when behavior can be preserved with fewer layers.
-- Keep polymorphism at true variation points such as brokers, data sources, features, strategies, and engines. Remove indirection that is not buying reuse, isolation, or substitutability.
-- Collapse one-off adapters, helper classes, and wrapper functions when they only forward calls without owning policy.
-- Prefer smaller public surfaces, simpler data flow, and fewer cross-module hops as long as all existing features remain intact.
+Refactor goals:
+1. Remove unnecessary compatibility modules such as shim-only `model.py`, `strategy.py`, `base_model.py`, or similar files when they add no behavior.
+2. Rename concrete implementation files to the simplest canonical names when that reduces navigation.
+3. Move imports to the actual owning modules instead of re-export barrels when clearer.
+4. Collapse single-use wrappers and helpers into their only caller.
+5. Delete dead code, stale tests, and duplicate paths.
+6. Keep real earned seams: registry plugins, ABCs, strategy `generate_signals`, engine `run`, broker/data/storage/feature abstractions.
+7. Preserve behavior unless the behavior only exists for backward compatibility.
 
-4. Verify the refactor
-- Re-read imports and constructors to confirm the architecture seam is actually restored.
-- Run repo-local tooling from `QTradeSystematic/.venv` when verification is needed.
-- Update or add tests at the correct tier: unit at the ABC boundary, integration with real in-memory storage, paper tests only against paper or testnet endpoints.
-- In the final report, name the rules addressed and call out any remaining assumptions or follow-up migrations.
+Process:
+- First produce a short audit table: file/module, why it is navigation tax, proposed action, risk.
+- Then implement the changes surgically.
+- Update imports, package `__init__.py`, configs, and tests.
+- Remove obsolete tests that only assert backward compatibility.
+- Keep behavioral tests that protect real strategy/data/backtest behavior.
+- Run focused tests with `.venv/bin/pytest`.
+- Run lint/format checks with `.venv/bin/ruff`.
+- Finish with a concise summary of what was removed, what was renamed, what compatibility broke intentionally, and what verification passed.
 
-## Lightweight Refactor Heuristics
-
-- Preserve externally visible behavior, supported config paths, and existing feature coverage unless the user explicitly asks for a behavioral change.
-- Prefer one clear abstraction over a stack of thin abstractions.
-- Inline trivial single-use helpers when they hide simple logic and make navigation harder.
-- Merge split responsibilities only when they are not independent variation points.
-- Convert repeated branching into polymorphism, but do not introduce new abstract layers for code that has only one realistic implementation.
-- If two components differ only by configuration, prefer one implementation plus config over sibling classes.
-- Keep registries and ABCs where the architecture already depends on them, but prune unused hooks and speculative seams.
-
-## Non-Negotiables
-
-- Do not introduce imports from reference systems.
-- Do not bypass a registry with a hardcoded constructor when the registry already exists.
-- Do not branch on `asset_type` inline in business logic.
-- Do not expose alternate public backtest entrypoints from strategy packages.
-- Do not hardcode credentials, broker names, engine names, schedules, or commission rates in flow code.
-- Do not replace `Decimal` monetary values with `float`.
-- Do not add explanatory comments unless the reason is non-obvious.
-
-## Output Expectations
-
-When using this skill, report:
-- the rule violations found,
-- the refactor applied,
-- what was simplified or removed to make the code lighter,
-- how feature parity was preserved,
-- the verification run or skipped,
-- any remaining migration risk if the codebase is only partially aligned.
+Important:
+- Use `rg` to trace imports before deleting anything.
+- Do not reformat unrelated files.
+- Do not revert unrelated existing user changes.
+- Prefer deletion and directness over new abstraction.

@@ -4,26 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from .algorithms import (
-    train_and_predict_ic_composite,
-    train_and_predict_linear_regression,
-    train_and_predict_xgb_ranker,
-    train_and_predict_xgb_regressor,
-)
-from qts.research.portfolio_construction import (
-    long_short_cost_adjusted_portfolio,
-    long_short_equal_weight_portfolio,
-    long_short_exponential_weight_portfolio,
-    long_short_hrp_portfolio,
-    long_short_inverse_volatility_portfolio,
-    long_short_kelly_portfolio,
-    long_short_mean_variance_portfolio,
-    long_short_mean_variance_turnover_portfolio,
-    long_short_min_variance_portfolio,
-    long_short_risk_parity_portfolio,
-    long_short_volatility_target_portfolio,
-)
-
 DEFAULT_NON_FACTOR_COLUMNS = {
     "date",
     "symbol",
@@ -48,7 +28,8 @@ def factor_feature_columns(
     return [
         column
         for column in columns
-        if column not in excluded and not any(column.startswith(prefix) for prefix in excluded_prefixes)
+        if column not in excluded
+        and not any(column.startswith(prefix) for prefix in excluded_prefixes)
     ]
 
 
@@ -66,19 +47,4 @@ __all__ = [
     "DEFAULT_NON_FACTOR_COLUMNS",
     "factor_feature_columns",
     "normalize_signed_weights",
-    "long_short_cost_adjusted_portfolio",
-    "long_short_equal_weight_portfolio",
-    "long_short_exponential_weight_portfolio",
-    "long_short_hrp_portfolio",
-    "long_short_inverse_volatility_portfolio",
-    "long_short_kelly_portfolio",
-    "long_short_mean_variance_portfolio",
-    "long_short_mean_variance_turnover_portfolio",
-    "long_short_min_variance_portfolio",
-    "long_short_risk_parity_portfolio",
-    "long_short_volatility_target_portfolio",
-    "train_and_predict_ic_composite",
-    "train_and_predict_linear_regression",
-    "train_and_predict_xgb_ranker",
-    "train_and_predict_xgb_regressor",
 ]

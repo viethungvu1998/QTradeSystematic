@@ -7,8 +7,9 @@ from datetime import date, timedelta
 
 import polars as pl
 
+from qts.core.errors import DataSourceError
 from qts.core.instrument import AssetType
-from qts.data._schemas import TIME_COLUMN, DataType
+from qts.data._schemas import FUTURES_INTRADAY_OHLCV_COLUMNS, TIME_COLUMN, DataType
 from qts.data.base import BaseDataSource
 from qts.data.bundles.base import BaseBundleAdapter
 from qts.data.bundles.zipline_ingest import ingest_duckdb_to_bundle
@@ -42,6 +43,7 @@ class DataManager:
         vn_stock_table: str = "vn_stock_prices",
         vn_warrant_table: str = "vn_warrant_prices",
         vn_futures_table: str = "vn_futures_prices",
+        vn_futures_intraday_table: str = "vn_futures_intraday_prices",
         crypto_table: str = "crypto_prices",
         futures_table: str = "futures_prices",
         bundle_name: str = "qts-stock-bundle",
@@ -53,6 +55,7 @@ class DataManager:
         self.vn_stock_table = vn_stock_table
         self.vn_warrant_table = vn_warrant_table
         self.vn_futures_table = vn_futures_table
+        self.vn_futures_intraday_table = vn_futures_intraday_table
         self.crypto_table = crypto_table
         self.futures_table = futures_table
         self.bundle_name = bundle_name
@@ -102,11 +105,12 @@ class DataManager:
         if source is None:
             return pl.DataFrame()
 
-        table = self._table_name(asset_type, data_type)
+        table = self._table_name(asset_type, data_type, **kwargs)
         cache_key = self._cache_key(data_type, symbol, **kwargs)
         if self.cache is not None and self.cache.exists(cache_key):
             cached = self._sort_frame(self.cache.read(cache_key), data_type)
             if cached.height > 0:
+                cached = self._prepare_for_storage(table, cached, symbol, data_type, kwargs)
                 self.storage.append(table, cached)
                 return cached
 
@@ -187,7 +191,16 @@ class DataManager:
         cache_key: str | None = None,
     ) -> pl.DataFrame:
         fetched_frames = [
-            self._sort_frame(await source.fetch(data_type, symbol, **range_kwargs), data_type)
+            self._prepare_for_storage(
+                table,
+                self._sort_frame(
+                    await source.fetch(data_type, symbol, **range_kwargs),
+                    data_type,
+                ),
+                symbol,
+                data_type,
+                range_kwargs,
+            )
             for range_kwargs in ranges
         ]
         nonempty = [frame for frame in fetched_frames if frame.height > 0]
@@ -210,6 +223,8 @@ class DataManager:
 
     def _db_lookup(self, table: str, symbol: str, data_type: DataType, **kwargs) -> pl.DataFrame:
         conditions = [f"symbol = '{symbol}'"]
+        if table == self.vn_futures_intraday_table and kwargs.get("interval") is not None:
+            conditions.append(f"interval = '{kwargs['interval']}'")
         time_column = TIME_COLUMN[data_type]
         if time_column is not None:
             start = kwargs.get("start")
@@ -235,7 +250,13 @@ class DataManager:
             expanded.extend(resolved)
         return list(dict.fromkeys(expanded))
 
-    def _table_name(self, asset_type: AssetType, data_type: DataType) -> str:
+    def _table_name(self, asset_type: AssetType, data_type: DataType, **kwargs) -> str:
+        if (
+            asset_type is AssetType.VN_FUTURES
+            and data_type is DataType.FUTURES_OHLCV
+            and self._is_intraday_interval(kwargs.get("interval", "1d"))
+        ):
+            return self.vn_futures_intraday_table
         return self._table_map.get((asset_type, data_type), data_type.value)
 
     def price_history_table(self, symbol: str) -> str | None:
@@ -244,6 +265,42 @@ class DataManager:
         if data_type is None:
             return None
         return self._table_name(asset_type, data_type)
+
+    def upsert_bars(
+        self,
+        table: str,
+        frame: pl.DataFrame,
+        sort_by: list[str],
+        identity: list[str],
+    ) -> pl.DataFrame:
+        if not sort_by:
+            raise ValueError("sort_by must contain at least one column")
+        if not identity:
+            raise ValueError("identity must contain at least one column")
+
+        required_columns = list(dict.fromkeys([*identity, *sort_by]))
+        missing_columns = [column for column in required_columns if column not in frame.columns]
+        if missing_columns:
+            raise ValueError(f"upsert frame is missing columns: {missing_columns}")
+
+        if frame.height > 0:
+            incoming = frame.unique(subset=identity, keep="last", maintain_order=True).sort(
+                sort_by
+            )
+            self.storage.append(table, incoming)
+        elif not self.storage.exists(table):
+            return frame
+
+        stored = self.storage.read(table)
+        missing_stored_columns = [
+            column for column in required_columns if column not in stored.columns
+        ]
+        if missing_stored_columns:
+            raise ValueError(f"stored table is missing columns: {missing_stored_columns}")
+
+        canonical = stored.unique(subset=identity, keep="last", maintain_order=True).sort(sort_by)
+        self.storage.write(table, canonical)
+        return canonical
 
     def _cache_key(self, data_type: DataType, symbol: str, **kwargs) -> str:
         normalized_kwargs = "_".join(
@@ -255,13 +312,47 @@ class DataManager:
     def _sort_frame(self, frame: pl.DataFrame, data_type: DataType) -> pl.DataFrame:
         time_column = TIME_COLUMN[data_type]
         sort_columns = [
-            column for column in [time_column, "symbol"] if column and column in frame.columns
+            column
+            for column in ["bar_time", time_column, "symbol", "interval"]
+            if column and column in frame.columns
         ]
         if sort_columns:
             return frame.sort(sort_columns)
         if "symbol" in frame.columns:
             return frame.sort("symbol")
         return frame
+
+    def _prepare_for_storage(
+        self,
+        table: str,
+        frame: pl.DataFrame,
+        symbol: str,
+        data_type: DataType,
+        kwargs: dict,
+    ) -> pl.DataFrame:
+        if table != self.vn_futures_intraday_table or frame.height == 0:
+            return frame
+        if "bar_time" not in frame.columns:
+            start = kwargs.get("start")
+            end = kwargs.get("end")
+            raise DataSourceError(
+                "Intraday VN futures bars require bar_time before storage",
+                symbol,
+                (start, end) if start is not None and end is not None else None,
+            )
+        interval = kwargs.get("interval", "1d")
+        result = frame
+        if "interval" not in result.columns:
+            result = result.with_columns(pl.lit(interval).alias("interval"))
+        result = result.with_columns(
+            pl.col("bar_time").cast(pl.Datetime).alias("bar_time"),
+            pl.col("bar_time").cast(pl.Date).alias("date"),
+        )
+        return self._sort_frame(result.select(FUTURES_INTRADAY_OHLCV_COLUMNS), data_type)
+
+    @staticmethod
+    def _is_intraday_interval(interval: str | None) -> bool:
+        return interval is not None and interval.lower() not in {"1d", "1w", "1mo"}
 
     async def get_ohlcv(
         self,

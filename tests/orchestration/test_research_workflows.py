@@ -84,6 +84,41 @@ def test_expand_grid_sweep_uses_dotted_paths_without_mutating_base():
     assert "long_quantile" not in base["strategy"]["params"]
 
 
+def test_expand_grid_sweep_can_override_ml_factor_model_params():
+    base = _base_runtime_config()
+    base["strategy"] = {
+        "type": "ml_factor",
+        "params": {
+            "model": {
+                "name": "xgb_classifier",
+                "params": {"n_estimators": 50, "learning_rate": 0.05},
+            },
+        },
+    }
+    sweep = {
+        "sweep": {
+            "mode": "grid",
+            "axes": [
+                {"path": "strategy.params.model.params.learning_rate", "values": [0.01, 0.05]},
+                {"path": "strategy.params.model.params.n_estimators", "values": [50, 100]},
+            ],
+        }
+    }
+
+    arms = research.expand_grid_sweep(base, sweep)
+
+    assert len(arms) == 4
+    assert arms[0].params == {
+        "strategy.params.model.params.learning_rate": 0.01,
+        "strategy.params.model.params.n_estimators": 50,
+    }
+    assert arms[-1].config["strategy"]["params"]["model"]["params"] == {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+    }
+    assert base["strategy"]["params"]["model"]["params"]["n_estimators"] == 50
+
+
 class FakeTrial:
     def __init__(self, number: int) -> None:
         self.number = number
@@ -113,7 +148,7 @@ def test_suggest_optuna_params_supports_float_int_and_categorical():
             "step": 0.1,
         },
         {
-            "path": "strategy.params.trainer.params.model_params.max_depth",
+            "path": "strategy.params.model.params.max_depth",
             "type": "int",
             "low": 2,
             "high": 6,
@@ -129,12 +164,12 @@ def test_suggest_optuna_params_supports_float_int_and_categorical():
 
     assert params == {
         "strategy.params.long_quantile": 0.6,
-        "strategy.params.trainer.params.model_params.max_depth": 2,
+        "strategy.params.model.params.max_depth": 2,
         "strategy.params.portfolio.name": "equal_weight",
     }
     assert trial.calls == [
         ("float", "strategy.params.long_quantile", 0.6, 0.9, 0.1, False),
-        ("int", "strategy.params.trainer.params.model_params.max_depth", 2, 6, 1, False),
+        ("int", "strategy.params.model.params.max_depth", 2, 6, 1, False),
         ("categorical", "strategy.params.portfolio.name", ["equal_weight", "risk_parity"]),
     ]
 

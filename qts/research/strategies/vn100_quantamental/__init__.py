@@ -1,40 +1,21 @@
-"""VN100 quantamental ML factor strategy package.
+"""VN100 quantamental ML factor strategies."""
 
-Class hierarchy
----------------
-BaseFactorStrategy (qts.research.strategies.factor.base)
-└── VN100QuantamentalStrategy
-
-Pipeline
---------
-raw OHLCV
-  → build_model_frame  (features.py)
-      → screen_liquid_universe
-      → add_qsmom_features
-      → add_technical_features
-      → VNFundamentalFeatures
-      → add_factor_scores
-      → ForwardReturns
-  → walk_forward_ml_signals  (signals.py)
-      → XGBoost regressor (rolling window)
-      → long_short_equal_weight_portfolio
-  → BacktestResult
-"""
-
-from . import strategy  # noqa: F401 — triggers @Registry.register_strategy side effect
-from .config import (
-    TECHNICAL_BASE_COLUMNS,
-    MODEL_PARAMS,
-    ExperimentConfig,
-    FeatureConfig,
-    qsmom_column,
-)
-from .data import (
+from qts.data.vn100_quantamental import (
     fetch_prices_and_fundamentals,
     fundamental_cache_report,
     load_vn100_symbols,
     make_vn_manager,
     normalize_vn_symbol,
+)
+
+from . import factories  # noqa: F401
+from .base import BaseVN100QuantamentalStrategy
+from .config import (
+    MODEL_PARAMS,
+    TECHNICAL_BASE_COLUMNS,
+    ExperimentConfig,
+    FeatureConfig,
+    qsmom_column,
 )
 from .features import (
     add_factor_scores,
@@ -45,6 +26,7 @@ from .features import (
     screen_liquid_universe,
     technical_columns,
 )
+from .quantamental import VN100QuantamentalStrategy, make_sweep_arms
 from .signals import (
     available_predictors,
     choose_predictors,
@@ -53,9 +35,9 @@ from .signals import (
     signals_from_weights,
     walk_forward_ml_signals,
 )
-from .strategy import VN100QuantamentalStrategy, make_sweep_arms
 
 __all__ = [
+    "BaseVN100QuantamentalStrategy",
     # Strategy class
     "VN100QuantamentalStrategy",
     # Config

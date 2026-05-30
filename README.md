@@ -93,9 +93,8 @@ Strategy architecture direction:
 
 ### Backtesting
 
-- `vectorbt` / `fast` -> `VectorBTProEngine`
+- `vectorbt` -> `VectorBTProEngine`
 - `zipline` -> `ZiplineReloadedEngine`
-- YAML alias `normal` currently normalizes to `zipline` at config-load time
 - Walk-forward signal generation via `qts/research/backtest/_runner.py`
 
 Supported direction:

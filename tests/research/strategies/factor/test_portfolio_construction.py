@@ -1,40 +1,41 @@
-"""Tests for strategies.factor.portfolio_construction."""
+"""Tests for portfolio construction."""
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
-from qts.research.strategies.factor.portfolio_construction import (
+from qts.research.portfolio_construction import (
     apply_correlation_penalty,
     apply_factor_neutrality,
     apply_liquidity_cap,
     apply_volatility_cap,
     apply_weight_constraints,
     long_short_equal_weight_portfolio,
-    long_short_exponential_weight_portfolio,
     long_short_hrp_portfolio,
     long_short_inverse_volatility_portfolio,
     long_short_kelly_portfolio,
     long_short_mean_variance_portfolio,
     long_short_min_variance_portfolio,
     long_short_risk_parity_portfolio,
-    long_short_volatility_target_portfolio,
 )
-
 
 # ---- long_short_equal_weight_portfolio ----
 
+
 def test_equal_weight_one_long(predictions):
-    result = long_short_equal_weight_portfolio(predictions, num_long_positions=1, num_short_positions=0)
+    result = long_short_equal_weight_portfolio(
+        predictions, num_long_positions=1, num_short_positions=0
+    )
     assert len(result) == 1
     assert list(result.values())[0] == pytest.approx(1.0)
     assert all(v > 0 for v in result.values())
 
 
 def test_equal_weight_one_long_one_short(predictions):
-    result = long_short_equal_weight_portfolio(predictions, num_long_positions=1, num_short_positions=1)
+    result = long_short_equal_weight_portfolio(
+        predictions, num_long_positions=1, num_short_positions=1
+    )
     positives = [v for v in result.values() if v > 0]
     negatives = [v for v in result.values() if v < 0]
     assert len(positives) == 1
@@ -53,8 +54,11 @@ def test_equal_weight_empty_predictions():
 
 # ---- long_short_inverse_volatility_portfolio ----
 
+
 def test_inverse_vol_two_longs(predictions, history_pd):
-    result = long_short_inverse_volatility_portfolio(predictions, num_long_positions=2, history_df=history_pd)
+    result = long_short_inverse_volatility_portfolio(
+        predictions, num_long_positions=2, history_df=history_pd
+    )
     positives = {k: v for k, v in result.items() if v > 0}
     assert len(positives) == 2
     assert all(v > 0 for v in positives.values())
@@ -62,14 +66,19 @@ def test_inverse_vol_two_longs(predictions, history_pd):
 
 
 def test_inverse_vol_no_history_no_exception(predictions):
-    result = long_short_inverse_volatility_portfolio(predictions, num_long_positions=2, history_df=None)
+    result = long_short_inverse_volatility_portfolio(
+        predictions, num_long_positions=2, history_df=None
+    )
     assert isinstance(result, dict)
 
 
 # ---- long_short_risk_parity_portfolio ----
 
+
 def test_risk_parity_positive_weights(predictions, history_pd):
-    result = long_short_risk_parity_portfolio(predictions, num_long_positions=2, history_df=history_pd)
+    result = long_short_risk_parity_portfolio(
+        predictions, num_long_positions=2, history_df=history_pd
+    )
     positives = {k: v for k, v in result.items() if v > 0}
     assert len(positives) >= 1
     assert all(v > 0 for v in positives.values())
@@ -82,8 +91,11 @@ def test_risk_parity_no_history_no_exception(predictions):
 
 # ---- long_short_mean_variance_portfolio ----
 
+
 def test_mean_variance_returns_dict(predictions, history_pd):
-    result = long_short_mean_variance_portfolio(predictions, num_long_positions=2, history_df=history_pd)
+    result = long_short_mean_variance_portfolio(
+        predictions, num_long_positions=2, history_df=history_pd
+    )
     assert isinstance(result, dict)
     for k in result:
         assert k in predictions.index
@@ -96,16 +108,20 @@ def test_mean_variance_no_history_no_exception(predictions):
 
 # ---- long_short_min_variance_portfolio ----
 
+
 def test_min_variance_long_weights_non_negative(predictions, history_pd):
-    result = long_short_min_variance_portfolio(predictions, num_long_positions=2, history_df=history_pd)
+    result = long_short_min_variance_portfolio(
+        predictions, num_long_positions=2, history_df=history_pd
+    )
     positives = {k: v for k, v in result.items() if v > 0}
     assert all(v >= 0 for v in positives.values())
 
 
 # ---- long_short_hrp_portfolio ----
 
+
 def test_hrp_valid_result(predictions, history_pd):
-    scipy = pytest.importorskip("scipy")
+    pytest.importorskip("scipy")
     result = long_short_hrp_portfolio(predictions, num_long_positions=2, history_df=history_pd)
     assert isinstance(result, dict)
 
@@ -118,13 +134,16 @@ def test_hrp_no_history_no_exception(predictions):
 
 # ---- long_short_kelly_portfolio ----
 
+
 def test_kelly_max_weight_respected(predictions, history_pd):
-    result = long_short_kelly_portfolio(predictions, num_long_positions=2, history_df=history_pd,
-                                        max_abs_weight=0.3)
+    result = long_short_kelly_portfolio(
+        predictions, num_long_positions=2, history_df=history_pd, max_abs_weight=0.3
+    )
     assert all(abs(v) <= 0.3 + 1e-9 for v in result.values())
 
 
 # ---- apply_weight_constraints ----
+
 
 def test_apply_weight_constraints_max_weight():
     weights = {"A": 0.5, "B": -0.3}
@@ -142,6 +161,7 @@ def test_apply_weight_constraints_sector():
 
 # ---- apply_factor_neutrality ----
 
+
 def test_apply_factor_neutrality_removes_exposure():
     weights = {"A": 0.3, "B": -0.2, "C": 0.1}
     exposures = pd.DataFrame({"factor1": [1.0, -1.0, 0.5]}, index=["A", "B", "C"])
@@ -152,6 +172,7 @@ def test_apply_factor_neutrality_removes_exposure():
 
 
 # ---- apply_volatility_cap ----
+
 
 def test_apply_volatility_cap_with_history(predictions, history_pd):
     weights = {"A": 0.5, "B": 0.5, "C": 0.3}
@@ -167,6 +188,7 @@ def test_apply_volatility_cap_no_history_unchanged():
 
 # ---- apply_correlation_penalty ----
 
+
 def test_apply_correlation_penalty_with_history(predictions, history_pd):
     weights = {"A": 0.5, "B": 0.3, "C": 0.2}
     result = apply_correlation_penalty(weights, history_df=history_pd)
@@ -181,6 +203,7 @@ def test_apply_correlation_penalty_no_history_unchanged():
 
 
 # ---- apply_liquidity_cap ----
+
 
 def test_apply_liquidity_cap_no_capital_base_unchanged():
     weights = {"A": 0.5, "B": 0.3}

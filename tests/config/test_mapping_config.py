@@ -7,7 +7,7 @@ import pytest
 
 from qts.config.builder import Config
 from qts.config.loader import load_config_from_mapping
-from qts.research.strategies.ml_factor.model import MLFactorStrategy
+from qts.research.strategies.ml_factor.classification import MLFactorStrategy
 
 
 def _research_mapping() -> dict[str, object]:
@@ -91,6 +91,17 @@ def test_config_build_supports_ml_factor_base_config(monkeypatch, tmp_path):
     assert resolved.strategy.target_col == "forward_return_21"
     assert resolved.strategy.rebalance_period == 10
     assert resolved.raw.rebalance_frequency == 10
+    assert resolved.strategy.model is not None
+    assert resolved.strategy.model.xgb_params == {
+        "n_estimators": 50,
+        "max_depth": 3,
+        "learning_rate": 0.05,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85,
+        "eval_metric": "mlogloss",
+        "random_state": 42,
+        "n_jobs": -1,
+    }
 
 
 def test_ml_factor_rebalance_period_rejects_strings(monkeypatch, tmp_path):

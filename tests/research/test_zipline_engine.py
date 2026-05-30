@@ -23,8 +23,7 @@ from qts.research.backtest.engines.zipline_engine import (
     filter_zipline_compatible_data,
 )
 from qts.research.strategies.base import BaseStrategy
-from qts.research.strategies.stat_arb.model import StatArbStrategy
-
+from qts.research.strategies.stat_arb.mean_reversion import StatArbStrategy
 
 ZIPLINE_AVAILABLE = importlib.util.find_spec("zipline") is not None
 
@@ -34,7 +33,9 @@ def isolated_qts_root(tmp_path, monkeypatch):
     monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts-root"))
 
 
-def _synthetic_ohlcv(symbols: list[str], *, freq: str = "B", periods: int = 252, start: str = "2022-01-03") -> pl.DataFrame:
+def _synthetic_ohlcv(
+    symbols: list[str], *, freq: str = "B", periods: int = 252, start: str = "2022-01-03"
+) -> pl.DataFrame:
     rng = np.random.default_rng(42)
     dates = pd.date_range(start, periods=periods, freq=freq)
     rows: list[dict[str, object]] = []
@@ -57,15 +58,18 @@ def _synthetic_ohlcv(symbols: list[str], *, freq: str = "B", periods: int = 252,
                     "volume": volume,
                 }
             )
-    return pl.DataFrame(rows, schema={
-        "date": pl.Date,
-        "symbol": pl.Utf8,
-        "open": pl.Float64,
-        "high": pl.Float64,
-        "low": pl.Float64,
-        "close": pl.Float64,
-        "volume": pl.Float64,
-    })
+    return pl.DataFrame(
+        rows,
+        schema={
+            "date": pl.Date,
+            "symbol": pl.Utf8,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        },
+    )
 
 
 class MockStrategy(BaseStrategy):
@@ -83,12 +87,15 @@ class MockStrategy(BaseStrategy):
                         "weight": 1 / 3,
                     }
                 )
-        return pl.DataFrame(rows, schema={
-            "date": pl.Date,
-            "symbol": pl.Utf8,
-            "signal": pl.Int32,
-            "weight": pl.Float64,
-        })
+        return pl.DataFrame(
+            rows,
+            schema={
+                "date": pl.Date,
+                "symbol": pl.Utf8,
+                "signal": pl.Int32,
+                "weight": pl.Float64,
+            },
+        )
 
 
 @pytest.fixture
@@ -133,15 +140,18 @@ def crypto_pair_ohlcv_fixture() -> pl.DataFrame:
                 },
             ]
         )
-    return pl.DataFrame(rows, schema={
-        "date": pl.Date,
-        "symbol": pl.Utf8,
-        "open": pl.Float64,
-        "high": pl.Float64,
-        "low": pl.Float64,
-        "close": pl.Float64,
-        "volume": pl.Float64,
-    })
+    return pl.DataFrame(
+        rows,
+        schema={
+            "date": pl.Date,
+            "symbol": pl.Utf8,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        },
+    )
 
 
 @pytest.fixture
@@ -157,7 +167,9 @@ def crypto_futures_overflow_fixture() -> pl.DataFrame:
     ada_base = np.cumsum(rng.normal(0.001, 0.01, len(dates))) + 0.75
     ada_spread = 0.08 * np.sin(np.linspace(0.0, 16.0 * np.pi, len(dates)))
     ada = ada_base + ada_spread
-    doge = 0.22 + 0.12 * (ada - ada.mean()) + 0.03 * np.cos(np.linspace(0.0, 16.0 * np.pi, len(dates)))
+    doge = (
+        0.22 + 0.12 * (ada - ada.mean()) + 0.03 * np.cos(np.linspace(0.0, 16.0 * np.pi, len(dates)))
+    )
 
     rows: list[dict[str, object]] = []
     for current, avax_close, link_close, ada_close, doge_close in zip(
@@ -204,15 +216,18 @@ def crypto_futures_overflow_fixture() -> pl.DataFrame:
             ]
         )
 
-    return pl.DataFrame(rows, schema={
-        "date": pl.Date,
-        "symbol": pl.Utf8,
-        "open": pl.Float64,
-        "high": pl.Float64,
-        "low": pl.Float64,
-        "close": pl.Float64,
-        "volume": pl.Float64,
-    })
+    return pl.DataFrame(
+        rows,
+        schema={
+            "date": pl.Date,
+            "symbol": pl.Utf8,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        },
+    )
 
 
 @pytest.fixture
@@ -271,7 +286,9 @@ def test_zipline_result_schema(stock_ohlcv_fixture, mock_strategy, research_conf
 
 
 @pytest.mark.skipif(not ZIPLINE_AVAILABLE, reason="zipline extra not installed")
-def test_zipline_accepts_crypto_with_default_always_open_calendar(crypto_ohlcv_fixture, mock_strategy):
+def test_zipline_accepts_crypto_with_default_always_open_calendar(
+    crypto_ohlcv_fixture, mock_strategy
+):
     config = BacktestConfig(
         workflow="research",
         asset_types=["crypto"],
@@ -328,7 +345,9 @@ def test_build_target_schedule_holds_missing_days_and_emits_zero_exits():
 
 
 def test_build_price_scale_map_scales_fractional_crypto_targets():
-    base_fixture = _synthetic_ohlcv(["BTC/USDT", "ETH/USDT"], freq="D", periods=12, start="2024-01-01")
+    base_fixture = _synthetic_ohlcv(
+        ["BTC/USDT", "ETH/USDT"], freq="D", periods=12, start="2024-01-01"
+    )
     scale_expr = (
         pl.when(pl.col("symbol") == "BTC/USDT")
         .then(pl.lit(1000.0))
@@ -351,7 +370,9 @@ def test_build_price_scale_map_scales_fractional_crypto_targets():
             "weight": [0.0001, 0.9999, 0.0, 0.0],
         }
     )
-    schedule = build_target_schedule(signals, sessions, ["BTC/USDT", "ETH/USDT"], shift_by_one_bar=True)
+    schedule = build_target_schedule(
+        signals, sessions, ["BTC/USDT", "ETH/USDT"], shift_by_one_bar=True
+    )
     config = BacktestConfig(
         workflow="research",
         asset_types=["crypto"],
@@ -373,9 +394,7 @@ def test_build_price_scale_map_scales_fractional_crypto_futures_targets():
         start="2024-01-01",
     )
     scale_expr = (
-        pl.when(pl.col("symbol") == "PERP:BTC/USDT")
-        .then(pl.lit(1500.0))
-        .otherwise(pl.lit(50.0))
+        pl.when(pl.col("symbol") == "PERP:BTC/USDT").then(pl.lit(1500.0)).otherwise(pl.lit(50.0))
     )
     fixture = base_fixture.with_columns(
         (pl.col("open") * scale_expr).alias("open"),
@@ -496,7 +515,9 @@ def test_zipline_filters_invalid_futures_leg_before_backtest(crypto_futures_over
     assert "PERP:ADA/USDT" not in set(zipline.signals["symbol"].unique().to_list())
     assert set(surviving_symbols) == {"PERP:AVAX/USDT", "PERP:LINK/USDT"}
 
-    doge_row = zipline_engine.last_preflight_report.filter(pl.col("symbol") == "PERP:DOGE/USDT").row(0, named=True)
+    doge_row = zipline_engine.last_preflight_report.filter(
+        pl.col("symbol") == "PERP:DOGE/USDT"
+    ).row(0, named=True)
     assert doge_row["valid_for_zipline"] is False
     assert doge_row["volume_overflow_rows"] > 0
     assert report.filter(pl.col("valid_for_zipline"))["symbol"].to_list() == [
@@ -504,13 +525,16 @@ def test_zipline_filters_invalid_futures_leg_before_backtest(crypto_futures_over
         "PERP:AVAX/USDT",
         "PERP:LINK/USDT",
     ]
-    assert vectorbt.signals.sort(["date", "symbol"]).equals(zipline.signals.sort(["date", "symbol"]))
+    assert vectorbt.signals.sort(["date", "symbol"]).equals(
+        zipline.signals.sort(["date", "symbol"])
+    )
     assert vectorbt.returns.height == zipline.returns.height
 
 
 @pytest.mark.skipif(not ZIPLINE_AVAILABLE, reason="zipline extra not installed")
 def test_zipline_crypto_bundle_retains_weekends(tmp_path, crypto_ohlcv_fixture):
     import os
+
     from zipline.data import bundles as zd_bundles
 
     adapter = ZiplineBundleAdapter(root=tmp_path / "zipline-root")
@@ -550,7 +574,9 @@ def test_crypto_stat_arb_parity_across_engines(crypto_pair_ohlcv_fixture):
     vectorbt = VectorBTProEngine().run(strategy, crypto_pair_ohlcv_fixture, config)
     zipline = ZiplineReloadedEngine().run(strategy, crypto_pair_ohlcv_fixture, config)
 
-    assert vectorbt.signals.sort(["date", "symbol"]).equals(zipline.signals.sort(["date", "symbol"]))
+    assert vectorbt.signals.sort(["date", "symbol"]).equals(
+        zipline.signals.sort(["date", "symbol"])
+    )
     assert vectorbt.returns.height == zipline.returns.height
     assert vectorbt.returns["date"].to_list() == zipline.returns["date"].to_list()
     assert vectorbt.metrics["sharpe"] * zipline.metrics["sharpe"] >= 0
@@ -560,4 +586,7 @@ def test_crypto_stat_arb_parity_across_engines(crypto_pair_ohlcv_fixture):
     assert abs(vectorbt.metrics["win_rate"] - zipline.metrics["win_rate"]) < 0.1
     final_vectorbt = float(vectorbt.equity_curve["equity"].to_list()[-1])
     final_zipline = float(zipline.equity_curve["equity"].to_list()[-1])
-    assert abs(final_vectorbt - final_zipline) / max(abs(final_vectorbt), abs(final_zipline), 1.0) < 0.02
+    assert (
+        abs(final_vectorbt - final_zipline) / max(abs(final_vectorbt), abs(final_zipline), 1.0)
+        < 0.02
+    )

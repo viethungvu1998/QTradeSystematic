@@ -344,7 +344,7 @@ class TestGenerateZscoreSignals:
 # model — StatArbStrategy
 # ===========================================================================
 
-from qts.research.strategies.stat_arb.model import StatArbStrategy
+from qts.research.strategies.stat_arb.mean_reversion import StatArbStrategy
 from qts.research.backtest.base import BacktestConfig, UniverseConfig
 from qts.research.backtest.engines.vectorbtpro_engine import VectorBTProEngine
 from qts.research.backtest.engines.zipline_engine import ZiplineReloadedEngine

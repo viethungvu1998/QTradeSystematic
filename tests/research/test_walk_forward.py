@@ -19,7 +19,6 @@ from qts.research.backtest.base import (
     UniverseConfig,
 )
 from qts.research.backtest.engines.vectorbtpro_engine import VectorBTProEngine
-from qts.research.backtest.engines.zipline_engine import ZiplineEngine
 from qts.research.features.pipeline import FeaturePipeline
 
 
@@ -181,12 +180,14 @@ def test_backtest_engines_accept_walk_forward_inputs():
     strategy = FlatStrategy()
 
     vectorbt = VectorBTProEngine().run(strategy, data, _config(), pipeline=pipeline, ohlcv=fixture)
-    zipline = ZiplineEngine().run(strategy, data, _config(), pipeline=pipeline, ohlcv=fixture)
-
-    for result in (vectorbt, zipline):
-        assert result.metrics["sharpe"] == result.metrics["sharpe"]
-        assert result.metrics["cagr"] == result.metrics["cagr"]
-        assert result.metrics["max_drawdown"] == result.metrics["max_drawdown"]
-    assert vectorbt.returns.schema == zipline.returns.schema
-    assert vectorbt.equity_curve.schema == zipline.equity_curve.schema
-    assert vectorbt.signals.schema == zipline.signals.schema
+    assert vectorbt.metrics["sharpe"] == vectorbt.metrics["sharpe"]
+    assert vectorbt.metrics["cagr"] == vectorbt.metrics["cagr"]
+    assert vectorbt.metrics["max_drawdown"] == vectorbt.metrics["max_drawdown"]
+    assert vectorbt.returns.schema == {"date": pl.Date, "portfolio_return": pl.Float64}
+    assert vectorbt.equity_curve.schema == {"date": pl.Date, "equity": pl.Float64}
+    assert vectorbt.signals.schema == {
+        "date": pl.Date,
+        "symbol": pl.String,
+        "signal": pl.Int32,
+        "weight": pl.Float64,
+    }

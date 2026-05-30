@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import polars as pl
 import pytest
 
 from qts.core.errors import DataSourceError, DataSourceWarning
 from qts.core.events import Tick
-from qts.data._schemas import DataType
+from qts.data._schemas import FUTURES_INTRADAY_OHLCV_COLUMNS, OHLCV_COLUMNS, DataType
 from qts.data.base import BaseDataSource
 from qts.data.bundles.local import LocalBundleAdapter
 from qts.data.manager import DataManager
@@ -65,6 +65,29 @@ class CountingSource(BaseDataSource):
         yield Tick  # pragma: no cover
 
 
+def _vn_futures_intraday_fixture(symbol: str = "VNF:VN30F1M") -> pl.DataFrame:
+    rows = []
+    intervals = ("15m", "30m", "1h")
+    for interval in intervals:
+        for index in range(2):
+            bar_time = datetime(2024, 1, 2, 9, 0) + timedelta(minutes=15 * index)
+            price = 1_250.0 + index
+            rows.append(
+                {
+                    "bar_time": bar_time,
+                    "date": bar_time.date(),
+                    "symbol": symbol,
+                    "interval": interval,
+                    "open": price,
+                    "high": price + 1.0,
+                    "low": price - 1.0,
+                    "close": price + 0.5,
+                    "volume": 1_000.0 + index,
+                }
+            )
+    return pl.DataFrame(rows)
+
+
 def test_data_type_and_capabilities():
     assert list(DataType) == [
         DataType.OHLCV,
@@ -94,6 +117,80 @@ def test_duckdb_storage_append_deduplicates(stock_ohlcv):
     storage.write("prices", stock_ohlcv.head(5))
     storage.append("prices", stock_ohlcv.head(5))
     assert storage.read("prices").height == 5
+
+
+def test_data_manager_upsert_bars_replaces_identity_and_sorts():
+    duck = DuckDBStorage()
+    manager = DataManager(stock_source=None, crypto_source=None, storage=duck)
+    table = "vn_futures_intraday_prices"
+    identity = ["symbol", "interval", "bar_time"]
+    sort_by = ["bar_time"]
+
+    first = _vn_futures_intraday_fixture().filter(pl.col("interval") == "15m").sort(
+        "bar_time",
+        descending=True,
+    )
+    second = pl.DataFrame(
+        [
+            {
+                "bar_time": datetime(2024, 1, 2, 9, 15),
+                "date": date(2024, 1, 2),
+                "symbol": "VNF:VN30F1M",
+                "interval": "15m",
+                "open": 1_300.0,
+                "high": 1_301.0,
+                "low": 1_299.0,
+                "close": 1_300.5,
+                "volume": 2_000.0,
+            },
+            {
+                "bar_time": datetime(2024, 1, 2, 9, 30),
+                "date": date(2024, 1, 2),
+                "symbol": "VNF:VN30F1M",
+                "interval": "15m",
+                "open": 1_301.0,
+                "high": 1_302.0,
+                "low": 1_300.0,
+                "close": 1_301.5,
+                "volume": 2_100.0,
+            },
+            {
+                "bar_time": datetime(2024, 1, 2, 9, 30),
+                "date": date(2024, 1, 2),
+                "symbol": "VNF:VN30F1M",
+                "interval": "15m",
+                "open": 1_302.0,
+                "high": 1_303.0,
+                "low": 1_301.0,
+                "close": 1_302.5,
+                "volume": 2_200.0,
+            },
+        ]
+    )
+
+    first_result = manager.upsert_bars(table, first, sort_by=sort_by, identity=identity)
+    second_result = manager.upsert_bars(table, second, sort_by=sort_by, identity=identity)
+
+    stored = duck.read(table)
+    duplicates = duck.query(
+        """
+        select symbol, interval, bar_time, count(*) as row_count
+        from vn_futures_intraday_prices
+        group by 1, 2, 3
+        having count(*) > 1
+        """
+    )
+
+    assert first_result["bar_time"].to_list() == sorted(first_result["bar_time"].to_list())
+    assert second_result.height == 3
+    assert stored["bar_time"].to_list() == sorted(stored["bar_time"].to_list())
+    assert duplicates.is_empty()
+    assert stored.filter(pl.col("bar_time") == datetime(2024, 1, 2, 9, 15))[
+        "close"
+    ].item() == 1_300.5
+    assert stored.filter(pl.col("bar_time") == datetime(2024, 1, 2, 9, 30))[
+        "close"
+    ].item() == 1_302.5
 
 
 async def test_data_manager_stock_and_crypto(tmp_path, stock_ohlcv, crypto_ohlcv):
@@ -363,6 +460,40 @@ async def test_vnstock_futures_fixture_mode(tmp_path, vn_futures_ohlcv):
 
 
 @pytest.mark.asyncio
+async def test_vnstock_futures_rolls_vn30f1m_to_kbs_front_month_code():
+    class FakeKBSClient:
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+
+        def get_ohlcv(self, **kwargs):
+            self.requests.append(kwargs)
+            return [
+                {
+                    "t": "2026-05-29T09:00:00",
+                    "o": 2000,
+                    "h": 2001,
+                    "l": 1999,
+                    "c": 2000.5,
+                    "v": 1000,
+                }
+            ]
+
+    client = FakeKBSClient()
+    source = VnstockFuturesDataSource(client=client)
+
+    result = await source.get_ohlcv(
+        "VNF:VN30F1M",
+        date(2026, 5, 29),
+        date(2026, 5, 29),
+        "15m",
+    )
+
+    assert client.requests[0]["symbol"] == "41I1G6000"
+    assert result.columns == FUTURES_INTRADAY_OHLCV_COLUMNS
+    assert result["symbol"].to_list() == ["VNF:VN30F1M"]
+
+
+@pytest.mark.asyncio
 async def test_data_manager_vn_futures_routing(tmp_path, vn_futures_ohlcv):
     duck = DuckDBStorage()
     manager = DataManager(
@@ -412,6 +543,111 @@ async def test_dnse_futures_fixture_mode(vn_futures_ohlcv):
     )
     assert result.height > 0
     assert result["symbol"][0] == "VNF:VN30F1M"
+
+
+@pytest.mark.asyncio
+async def test_vnstock_futures_intraday_fixture_preserves_bar_identity():
+    source = VnstockFuturesDataSource(
+        ohlcv_payloads={"VNF:VN30F1M": _vn_futures_intraday_fixture()}
+    )
+
+    result = await source.fetch(
+        DataType.FUTURES_OHLCV,
+        "VNF:VN30F1M",
+        start=date(2024, 1, 2),
+        end=date(2024, 1, 2),
+        interval="15m",
+    )
+
+    assert result.columns == FUTURES_INTRADAY_OHLCV_COLUMNS
+    assert result.height == 2
+    assert result["symbol"].unique().to_list() == ["VNF:VN30F1M"]
+    assert result["interval"].unique().to_list() == ["15m"]
+    assert result["bar_time"].n_unique() == 2
+
+
+@pytest.mark.asyncio
+async def test_data_manager_vn_futures_intraday_stores_multiple_intervals_without_collision(
+    tmp_path,
+):
+    duck = DuckDBStorage()
+    manager = DataManager(
+        stock_source=None,
+        crypto_source=None,
+        vn_futures_source=VnstockFuturesDataSource(
+            ohlcv_payloads={"VNF:VN30F1M": _vn_futures_intraday_fixture()}
+        ),
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    for interval in ("15m", "30m", "1h"):
+        data = await manager.get_vn_futures_ohlcv(
+            ["VNF:VN30F1M"],
+            date(2024, 1, 2),
+            date(2024, 1, 2),
+            interval=interval,
+        )
+        assert data.columns == FUTURES_INTRADAY_OHLCV_COLUMNS
+        assert data["interval"].unique().to_list() == [interval]
+
+    stored = duck.read("vn_futures_intraday_prices")
+    assert stored.height == 6
+    assert set(stored["interval"].unique().to_list()) == {"15m", "30m", "1h"}
+    assert "vn_futures_prices" not in duck.list_keys()
+
+
+@pytest.mark.asyncio
+async def test_data_manager_vn_futures_intraday_deduplicates_repeated_runs(tmp_path):
+    duck = DuckDBStorage()
+    manager = DataManager(
+        stock_source=None,
+        crypto_source=None,
+        vn_futures_source=VnstockFuturesDataSource(
+            ohlcv_payloads={"VNF:VN30F1M": _vn_futures_intraday_fixture()}
+        ),
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    request = {
+        "start": date(2024, 1, 2),
+        "end": date(2024, 1, 2),
+        "interval": "15m",
+    }
+    first = await manager.get_vn_futures_ohlcv(["VNF:VN30F1M"], **request)
+    second = await manager.get_vn_futures_ohlcv(["VNF:VN30F1M"], **request)
+
+    assert first.height == 2
+    assert second.height == 2
+    assert duck.read("vn_futures_intraday_prices").height == 2
+
+
+@pytest.mark.asyncio
+async def test_data_manager_vn_futures_daily_keeps_legacy_table_and_schema(
+    tmp_path,
+    vn_futures_ohlcv,
+):
+    duck = DuckDBStorage()
+    manager = DataManager(
+        stock_source=None,
+        crypto_source=None,
+        vn_futures_source=VnstockFuturesDataSource(
+            ohlcv_payloads={"VNF:VN30F1M": vn_futures_ohlcv}
+        ),
+        storage=duck,
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    data = await manager.get_vn_futures_ohlcv(
+        ["VNF:VN30F1M"],
+        date(2024, 1, 1),
+        date(2024, 3, 20),
+    )
+
+    assert data.columns == OHLCV_COLUMNS
+    assert "vn_futures_prices" in duck.list_keys()
+    assert "vn_futures_intraday_prices" not in duck.list_keys()
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,10 @@ class DuckDBStorage(BaseStorage):
             self.write(key, df)
             return
         self.connection.register("incoming_frame", df.to_arrow())
+        existing_columns = self._columns(key)
+        if self._uses_bar_identity(existing_columns, df.columns):
+            self._append_by_bar_identity(key, existing_columns)
+            return
         self.connection.execute(
             f"""
             insert into {key}
@@ -57,3 +61,46 @@ class DuckDBStorage(BaseStorage):
             "select table_name from information_schema.tables where table_schema = 'main'"
         ).fetchall()
         return sorted(row[0] for row in rows)
+
+    def _columns(self, key: str) -> list[str]:
+        rows = self.connection.execute(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = 'main' and table_name = ?
+            order by ordinal_position
+            """,
+            [key],
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def _append_by_bar_identity(self, key: str, columns: list[str]) -> None:
+        # Intraday bars can be revised; identity-based replacement avoids duplicate bar keys.
+        table = _quote_identifier(key)
+        self.connection.execute(
+            f"""
+            delete from {table}
+            where (symbol, interval, bar_time) in (
+                select symbol, interval, bar_time from incoming_frame
+            )
+            """
+        )
+        column_sql = ", ".join(_quote_identifier(column) for column in columns)
+        self.connection.execute(
+            f"""
+            insert into {table} ({column_sql})
+            select {column_sql}
+            from incoming_frame
+            """
+        )
+
+    @staticmethod
+    def _uses_bar_identity(existing_columns: list[str], incoming_columns: list[str]) -> bool:
+        identity_columns = {"symbol", "interval", "bar_time"}
+        return identity_columns <= set(existing_columns) and identity_columns <= set(
+            incoming_columns
+        )
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'

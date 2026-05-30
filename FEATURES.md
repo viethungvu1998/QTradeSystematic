@@ -6,9 +6,7 @@ Current capability inventory for the repository as it exists today.
 
 - Typed YAML parsing into `BacktestConfig`
 - Required-key validation by workflow
-- Engine alias normalization:
-  - `fast` -> `vectorbt`
-  - `normal` -> `zipline`
+- Engine resolution through canonical registry keys only: `vectorbt`, `zipline`
 - Registry-based resolution for:
   - data sources
   - features
@@ -126,6 +124,7 @@ Registered strategy keys:
 - `factor`
 - `ml_factor`
 - `stat_arb`
+- `vn100_quantamental` — walk-forward ML factor strategy for the VN100 universe (QSMOM + technicals + fundamentals, XGBoost regressor, long-only)
 
 Supporting modules exist for:
 
@@ -133,6 +132,49 @@ Supporting modules exist for:
 - portfolio construction functions
 - pair selection and spread signal generation
 - stat-arb universe screening
+
+Registered factor trainer keys:
+
+- `xgb_regressor` — XGBoost regressor trainer (factor family)
+- `xgb_ranker` — XGBoost learning-to-rank trainer (factor family)
+- `ic_composite` — IC-weighted composite trainer (factor family)
+- `xgb_classifier` — XGBoost classifier trainer (ml_factor family)
+
+Registered signal algorithm keys (`factor` family):
+
+- `cross_sectional_rank`
+- `factor_as_signal`
+- `ic_weighted`
+
+Registered spread model keys (`stat_arb` family):
+
+- `ols`
+- `rolling_ols`
+
+Registered signal rule keys (`stat_arb` family):
+
+- `zscore_threshold` — z-score band entry/exit rule with optional stop and max holding bars
+
+## Portfolio Construction
+
+Registered portfolio constructor keys:
+
+- `equal_weight`, `exponential_weight`, `cost_adjusted`
+- `inverse_volatility`, `volatility_target`
+- `mean_variance`, `min_variance`, `mean_variance_turnover`
+- `risk_parity`, `hrp`, `kelly`
+
+Constraint adjusters (not registry-backed, imported directly):
+
+- `apply_weight_constraints`, `apply_factor_neutrality`, `apply_volatility_cap`
+- `apply_correlation_penalty`, `apply_liquidity_cap`
+
+Registered ML model keys (`ml_factor` family):
+
+- `xgb_classifier`
+- `xgb_regressor`
+- `linear`
+- `ic_composite`
 
 Structure rules:
 
@@ -152,9 +194,7 @@ Shared backtest contracts:
 Registered engines:
 
 - `vectorbt`
-- `fast`
 - `zipline`
-- `normal`
 
 Other backtest support:
 

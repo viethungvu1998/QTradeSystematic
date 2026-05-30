@@ -6,21 +6,12 @@ numpy arrays of predictions aligned to the predict_data index.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
 
-
-
-def _to_pandas(frame: object, *, label: str = "frame") -> pd.DataFrame:
-    if isinstance(frame, pd.DataFrame):
-        return frame
-    if hasattr(frame, "to_pandas"):
-        result = frame.to_pandas()
-        if isinstance(result, pd.DataFrame):
-            return result
-    raise TypeError(f"{label} must be a pandas or polars DataFrame; got {type(frame)!r}")
+from qts.utils.dataframe import to_pandas_frame
 
 
 def train_and_predict_xgb_regressor(
@@ -31,17 +22,17 @@ def train_and_predict_xgb_regressor(
     model_params: dict,
 ) -> np.ndarray:
     """Fit an XGBoost regressor and return predictions for predict_data."""
-    from qts.research.strategies.ml_factor.models import fit_xgb_regressor
+    from qts.research.strategies.ml_factor.models.xgb import fit_xgb_regressor
 
-    train = _to_pandas(train_data, label="train_data")
-    predict = _to_pandas(predict_data, label="predict_data")
+    train = to_pandas_frame(train_data, label="train_data")
+    predict = to_pandas_frame(predict_data, label="predict_data")
 
-    X_train = train[predictor_cols]
+    x_train = train[predictor_cols]
     y_train = train[target_col]
-    X_predict = predict[predictor_cols]
+    x_predict = predict[predictor_cols]
 
-    model = fit_xgb_regressor(X_train, y_train, model_params)
-    return model.predict(X_predict)
+    model = fit_xgb_regressor(x_train, y_train, model_params)
+    return model.predict(x_predict)
 
 
 def train_and_predict_xgb_ranker(
@@ -52,10 +43,12 @@ def train_and_predict_xgb_ranker(
     model_params: dict,
 ) -> np.ndarray:
     """Fit an XGBoost ranker (per-date groups) and return predicted scores."""
-    from qts.research.strategies.ml_factor.models import fit_xgb_ranker
+    from qts.research.strategies.ml_factor.models.xgb import fit_xgb_ranker
 
-    train = _to_pandas(train_data, label="train_data").sort_values("date").reset_index(drop=True)
-    predict = _to_pandas(predict_data, label="predict_data")
+    train = (
+        to_pandas_frame(train_data, label="train_data").sort_values("date").reset_index(drop=True)
+    )
+    predict = to_pandas_frame(predict_data, label="predict_data")
 
     train["_group_id"] = pd.factorize(train["date"])[0]
     qid = train["_group_id"].values
@@ -81,23 +74,23 @@ def train_and_predict_linear_regression(
     from sklearn.preprocessing import StandardScaler
 
     cfg = model_params or {}
-    df = _to_pandas(data, label="data")
+    df = to_pandas_frame(data, label="data")
     features = [c for c in predictor_cols if c in df.columns]
     if not features or target_col not in df.columns:
         return pd.Series(dtype=float)
 
-    X_raw = df[features]
+    x_raw = df[features]
     y_raw = df[target_col]
-    mask = X_raw.notna().all(axis=1) & y_raw.notna()
+    mask = x_raw.notna().all(axis=1) & y_raw.notna()
     if not mask.any():
         return pd.Series(dtype=float)
 
-    X, y = X_raw.loc[mask].copy(), y_raw.loc[mask].copy()
+    x_frame, y = x_raw.loc[mask].copy(), y_raw.loc[mask].copy()
     # Drop zero-variance features
-    features = [c for c in X.columns if pd.to_numeric(X[c], errors="coerce").std() > 0]
+    features = [c for c in x_frame.columns if pd.to_numeric(x_frame[c], errors="coerce").std() > 0]
     if not features:
         return pd.Series(dtype=float)
-    X = X[features]
+    x_frame = x_frame[features]
 
     model_name = str(cfg.get("model", "linear")).lower()
     alpha = float(cfg.get("alpha", 1.0))
@@ -119,10 +112,10 @@ def train_and_predict_linear_regression(
         steps.append(("scale", StandardScaler()))
     steps.append(("model", model_cls))
     pipe = Pipeline(steps)
-    pipe.fit(X, y)
+    pipe.fit(x_frame, y)
 
-    X_pred = df.loc[mask, features]
-    preds = pipe.predict(X_pred)
+    x_pred = df.loc[mask, features]
+    preds = pipe.predict(x_pred)
     return pd.Series(preds, index=df.index[mask], name="y_pred")
 
 
@@ -161,8 +154,8 @@ def train_and_predict_ic_composite(
     """
     from scipy.stats import spearmanr
 
-    train = _to_pandas(train_data, label="train_data")
-    predict = _to_pandas(predict_data, label="predict_data")
+    train = to_pandas_frame(train_data, label="train_data")
+    predict = to_pandas_frame(predict_data, label="predict_data")
 
     cfg = (composite_params or {}).copy()
     factor_cols = [c for c in factor_cols if c in train.columns and c in predict.columns]
@@ -244,34 +237,55 @@ def train_and_predict_ic_composite(
                 return np.nan
             rho, _ = spearmanr(gg[col], gg[ret_col], nan_policy="omit")
             return float(rho) if np.isfinite(rho) else np.nan
+
         return proc.groupby("date").apply(_ic).astype(float)
 
-    ic_df = pd.DataFrame({c: _daily_ic(c, future_return_cols[horizon_map[c]]) for c in factor_cols}).sort_index()
+    ic_df = pd.DataFrame(
+        {c: _daily_ic(c, future_return_cols[horizon_map[c]]) for c in factor_cols}
+    ).sort_index()
 
     def _ewma_last(s: pd.Series, hl: float) -> float:
         s = s.dropna()
-        return float(s.ewm(halflife=hl, adjust=False, min_periods=1).mean().iloc[-1]) if not s.empty else np.nan
+        return (
+            float(s.ewm(halflife=hl, adjust=False, min_periods=1).mean().iloc[-1])
+            if not s.empty
+            else np.nan
+        )
 
     def _ewma_pos_frac(s: pd.Series, hl: float) -> float:
         s = (s > 0).astype(float)
-        return float(s.ewm(halflife=hl, adjust=False, min_periods=1).mean().iloc[-1]) if not s.dropna().empty else np.nan
+        return (
+            float(s.ewm(halflife=hl, adjust=False, min_periods=1).mean().iloc[-1])
+            if not s.dropna().empty
+            else np.nan
+        )
 
     ic_ewma = ic_df.apply(lambda s: _ewma_last(s, hl_days))
-    ic_ewma_std = ic_df.apply(lambda s: _ewma_last((s - s.ewm(halflife=hl_days, adjust=False).mean()).abs(), hl_days))
+    ic_ewma_std = ic_df.apply(
+        lambda s: _ewma_last((s - s.ewm(halflife=hl_days, adjust=False).mean()).abs(), hl_days)
+    )
     pos_frac = ic_df.apply(lambda s: _ewma_pos_frac(s, hl_days))
 
-    raw_w = ic_ewma / ic_ewma_std.replace(0, np.nan) if method in {"ewma_ir", "ir_weighted"} else ic_ewma.copy()
+    raw_w = (
+        ic_ewma / ic_ewma_std.replace(0, np.nan)
+        if method in {"ewma_ir", "ir_weighted"}
+        else ic_ewma.copy()
+    )
     raw_w = raw_w.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     adj_w = pd.Series(0.0, index=raw_w.index, dtype=float)
     for c in raw_w.index:
         ic_now = float(ic_ewma.get(c, 0.0))
         pos_now = float(pos_frac.get(c, np.nan))
-        guardrail_ok = (
-            abs(ic_now) >= min_abs_ic
-            and ((ic_now > 0 and pos_now >= min_pos_frac) or (ic_now < 0 and (1 - pos_now) >= min_pos_frac))
+        guardrail_ok = abs(ic_now) >= min_abs_ic and (
+            (ic_now > 0 and pos_now >= min_pos_frac)
+            or (ic_now < 0 and (1 - pos_now) >= min_pos_frac)
         )
-        signed = np.sign(ic_now) * abs(float(raw_w.get(c, 0.0))) if guardrail_ok else default_sign * abs(float(raw_w.get(c, 0.0)))
+        signed = (
+            np.sign(ic_now) * abs(float(raw_w.get(c, 0.0)))
+            if guardrail_ok
+            else default_sign * abs(float(raw_w.get(c, 0.0)))
+        )
         adj_w[c] = signed
 
     l1 = adj_w.abs().sum()

@@ -35,7 +35,8 @@ def get_feature_importance(
     _exclude = {"date", "symbol", "open", "high", "low", "close", "volume", "signal", "weight"}
     if feature_cols is None:
         feature_cols = [
-            c for c in df.columns
+            c
+            for c in df.columns
             if c not in _exclude and c != target_col and not c.startswith("forward_return_")
         ]
 
@@ -47,15 +48,14 @@ def get_feature_importance(
     params = {"n_estimators": 100, "max_depth": 4, "learning_rate": 0.1, "random_state": 42}
     params.update(model_params or {})
 
-    X = clean.select(feature_cols).to_pandas()
+    x_frame = clean.select(feature_cols).to_pandas()
     y = clean[target_col].to_pandas()
 
-    from qts.research.strategies.ml_factor.models import fit_xgb_regressor
+    from qts.research.strategies.ml_factor.models.xgb import fit_xgb_regressor
 
-    model = fit_xgb_regressor(X, y, params)
+    model = fit_xgb_regressor(x_frame, y, params)
 
     scores = model.get_booster().get_score(importance_type="gain")
-    return (
-        pl.DataFrame({"feature": list(scores.keys()), "importance": list(scores.values())})
-        .sort("importance", descending=True)
+    return pl.DataFrame({"feature": list(scores.keys()), "importance": list(scores.values())}).sort(
+        "importance", descending=True
     )

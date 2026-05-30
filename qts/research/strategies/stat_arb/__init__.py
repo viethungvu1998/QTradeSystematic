@@ -13,7 +13,7 @@ from .core import (
     preselect_pairs_by_correlation,
     stat_arb_universe_screener,
 )
-from .model import StatArbStrategy
+from .mean_reversion import StatArbStrategy
 
 __all__ = [
     "BaseStatArbStrategy",

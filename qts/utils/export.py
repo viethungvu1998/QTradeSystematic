@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 
@@ -18,6 +16,7 @@ from qts.research.backtest.base import (
     TRADE_LOG_SCHEMA,
     BacktestResult,
 )
+from qts.utils.dataframe import serialise_list_columns
 
 LIVE_PORTFOLIO_SCHEMA = {
     "timestamp": pl.Datetime(time_unit="us"),
@@ -68,21 +67,8 @@ def _validate_schema(
 
 
 def _write_csv(frame: pl.DataFrame, path: Path) -> None:
-    csv_frame = _serialise_list_columns(frame)
+    csv_frame = serialise_list_columns(frame)
     csv_frame.write_csv(path)
-
-
-def _serialise_list_columns(frame: pl.DataFrame) -> pl.DataFrame:
-    csv_frame = frame
-    for name, dtype in frame.schema.items():
-        if isinstance(dtype, pl.List):
-            values = [_to_json_text(value) for value in frame[name].to_list()]
-            csv_frame = csv_frame.with_columns(pl.Series(name, values, dtype=pl.String))
-    return csv_frame
-
-
-def _to_json_text(value: Any) -> str:
-    return json.dumps(value, separators=(",", ":"))
 
 
 def _token_snapshot_to_record(token: TokenSnapshot) -> dict[str, str | float]:

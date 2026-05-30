@@ -57,6 +57,7 @@ _FUTURES_ASSET_TYPES = (
     AssetType.VN_FUTURES,
     AssetType.CRYPTO_FUTURES,
 )
+VN_FUTURES_INTRADAY_INTERVALS = ("1h", "15m", "30m")
 
 
 def requested_symbols(config, asset_types: Iterable[str]) -> list[str]:
@@ -104,3 +105,29 @@ async def download_futures_ohlcv(config, manager):
         start=config.start_date,
         end=config.end_date,
     )
+
+
+@task(retries=2, retry_delay_seconds=60, name="download-vn-futures-intraday-ohlcv")
+async def download_vn_futures_intraday_ohlcv(
+    config,
+    manager,
+    intervals: Iterable[str] = VN_FUTURES_INTRADAY_INTERVALS,
+):
+    """Download configured VN futures once per requested intraday interval."""
+
+    symbols = _symbols_for_asset_types(config, (AssetType.VN_FUTURES,))
+    if not symbols:
+        return pl.DataFrame()
+
+    frames: list[pl.DataFrame] = []
+    for interval in intervals:
+        frame = await manager.get(
+            DataType.FUTURES_OHLCV,
+            symbols,
+            start=config.start_date,
+            end=config.end_date,
+            interval=interval,
+        )
+        if frame.height > 0:
+            frames.append(frame)
+    return pl.concat(frames, how="vertical") if frames else pl.DataFrame()

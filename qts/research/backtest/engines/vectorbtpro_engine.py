@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import numpy as np
 import pandas as pd
 import polars as pl
 
@@ -55,28 +54,6 @@ def _pivot_low(df: pl.DataFrame) -> pd.DataFrame:
     return _pivot_wide(df, "low")
 
 
-def _signals_to_order_size(
-    signals: pl.DataFrame,
-    close_wide: pd.DataFrame,
-) -> pd.DataFrame:
-    """Backward-compatible wrapper for existing tests and callers."""
-
-    idx = close_wide.index
-    cols = close_wide.columns.tolist()
-    if signals.is_empty():
-        return pd.DataFrame(np.nan, index=idx, columns=cols)
-
-    sig_pdf = signals.to_pandas().copy()
-    sig_pdf["target"] = np.where(sig_pdf["signal"] != 0, sig_pdf["signal"] * sig_pdf["weight"], 0.0)
-    target_pivot = (
-        sig_pdf.pivot(index="date", columns="symbol", values="target")
-        .rename_axis(index=None, columns=None)
-        .reindex(index=idx.date, columns=cols)
-    )
-    target_pivot.index = idx
-    return target_pivot
-
-
 def _extract_fees(config: BacktestConfig) -> float:
     if config.commission is None:
         return 0.001  # Binance taker default 0.1 %
@@ -100,17 +77,21 @@ def _vbt_pf_to_result(pf, signals: pl.DataFrame) -> BacktestResult:
     metrics = build_metrics(ret_series.to_list(), val_series.to_list())
 
     returns_df = pl.from_pandas(
-        pd.DataFrame({
-            "date": ret_series.index.date,
-            "portfolio_return": ret_series.to_numpy(),
-        })
+        pd.DataFrame(
+            {
+                "date": ret_series.index.date,
+                "portfolio_return": ret_series.to_numpy(),
+            }
+        )
     ).with_columns(pl.col("date").cast(pl.Date))
 
     equity_df = pl.from_pandas(
-        pd.DataFrame({
-            "date": val_series.index.date,
-            "equity": val_series.to_numpy(),
-        })
+        pd.DataFrame(
+            {
+                "date": val_series.index.date,
+                "equity": val_series.to_numpy(),
+            }
+        )
     ).with_columns(pl.col("date").cast(pl.Date))
     try:
         trade_log, portfolio_snapshots = vectorbt_observability(pf, val_series)
@@ -129,7 +110,6 @@ def _vbt_pf_to_result(pf, signals: pl.DataFrame) -> BacktestResult:
     )
 
 
-@Registry.register_engine("fast")
 @Registry.register_engine("vectorbt")
 class VectorBTProEngine(BaseEngine):
     """Vectorized engine backed by vectorbtpro.Portfolio.from_orders (TargetPercent)."""

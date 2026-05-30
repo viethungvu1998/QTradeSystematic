@@ -5,7 +5,6 @@ from __future__ import annotations
 from qts.config.builder import _collect_components
 from qts.core.instrument import AssetType
 from qts.data.manager import DataManager
-from qts.execution.router import OrderRouter
 
 
 def resolved_brokers(resolved: object) -> dict[AssetType, object]:
@@ -32,7 +31,3 @@ def build_data_manager(
         cache=resolved.cache,
         bundle_adapter=getattr(resolved, "bundle_adapter", None) if include_bundle else None,
     )
-
-
-def build_order_router(resolved: object) -> OrderRouter:
-    return OrderRouter(resolved_brokers(resolved))

@@ -1,0 +1,21 @@
+workflow: research
+asset_types: [vn_futures]
+universe:
+  vn_futures: [VNF:VN30F1M]
+start_date: "2021-05-29"
+end_date: "2026-05-29"
+initial_capital: 100000
+data_sources:
+  vn_futures: vnstock_futures
+storage: duckdb
+features:
+  indicators: []
+  technical: false
+  fundamental: false
+  onchain: false
+  forward_returns:
+    periods: []
+strategy:
+  type: factor
+  params: {}
+backtest_engine: vectorbt

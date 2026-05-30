@@ -8,7 +8,6 @@ from datetime import date
 import pandas as pd
 import polars as pl
 
-from qts.research.backtest._runner import _rebalance_dates
 from qts.research.portfolio_construction import long_short_equal_weight_portfolio
 from qts.research.strategies.base import BaseStrategy
 from qts.research.strategies.factor.algorithms import train_and_predict_xgb_regressor
@@ -19,6 +18,7 @@ from .config import MODEL_PARAMS, ExperimentConfig, FeatureConfig
 
 def default_predictor_candidates(config: FeatureConfig) -> list[str]:
     from qts.research.features.fundamentals import FUNDAMENTAL_FACTOR_GROUPS
+
     from .config import qsmom_column
 
     return [
@@ -88,6 +88,8 @@ def walk_forward_ml_signals(
     predictor_cols: list[str],
     target_col: str,
 ) -> pl.DataFrame:
+    from qts.research.backtest._runner import _rebalance_dates
+
     all_dates = sorted(df["date"].unique().to_list())
     rebalance = _rebalance_dates(all_dates, experiment.rebalance_period)
     date_index = {item: idx for idx, item in enumerate(all_dates)}

@@ -118,17 +118,6 @@ def _parse_date(value: str | None) -> date | None:
     return date.fromisoformat(str(value))
 
 
-def _normalize_backtest_engine(value: str | None) -> str:
-    if not value:
-        return "vectorbt"
-    normalized = value.strip().lower()
-    aliases = {
-        "fast": "vectorbt",
-        "normal": "zipline",
-    }
-    return aliases.get(normalized, normalized)
-
-
 def _strategy_params(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     strategy = payload.get("strategy", {})
     if not isinstance(strategy, Mapping):
@@ -234,7 +223,7 @@ def load_config_from_mapping(raw: Mapping[str, Any]) -> BacktestConfig:
         storage=payload.get("storage", "duckdb"),
         features=features_config,
         strategy=StrategyConfig(**payload.get("strategy", {})),
-        backtest_engine=_normalize_backtest_engine(payload.get("backtest_engine")),
+        backtest_engine=str(payload.get("backtest_engine", "vectorbt")).strip().lower(),
         train_window=payload.get("train_window", train_window_default),
         rebalance_frequency=_resolve_rebalance(payload),
         fill_model=payload.get("fill_model"),
@@ -261,11 +250,6 @@ def load_config(path: str | Path) -> BacktestConfig:
     """Parse and validate YAML into a typed config."""
 
     return load_config_from_mapping(load_config_mapping(path))
-
-
-def load_config_from_file(path: str | Path) -> BacktestConfig:
-    """Backward-compatible alias for load_config."""
-    return load_config(path)
 
 
 def load_config_mapping(path: str | Path) -> dict[str, Any]:

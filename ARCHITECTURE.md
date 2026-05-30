@@ -28,7 +28,7 @@ Shared models and extension points.
 - `portfolio.py`: `Position`, `Portfolio`
 - `events.py`: async tick/order event models
 - `registry.py`: central plugin registry
-- `observability.py`: `ClosedTrade`, `PositionSnapshot`, `TradeLog` result types
+- `observability.py`: `ClosedTrade`, `TokenSnapshot`, `PortfolioSnapshot`, `snapshot_portfolio` live-mode result types
 
 Asset type routing is derived from symbol strings via `AssetType.from_symbol()`:
 
@@ -68,7 +68,8 @@ Default storage paths come from `qts/utils/paths.py`:
 ```text
 ~/.qts/
 ├── database/qts.duckdb          ← stock_prices, crypto_prices, futures_prices,
-│                                   vn_stock_prices, vn_futures_prices, vn_warrant_prices
+│                                   vn_stock_prices, vn_futures_prices, vn_warrant_prices,
+│                                   vn_futures_intraday_prices
 ├── cache/
 │   └── vn_fundamentals/         ← {ticker}_{annual|quarterly}.parquet, TTL 24 h
 └── bundles/                     ← Zipline bundles
@@ -130,6 +131,16 @@ qts/research/
 └── strategies/
 ```
 
+#### Portfolio construction
+
+`qts/research/portfolio_construction/` provides a class-based and functional API for building signal weight vectors.
+
+Class hierarchy: `BasePortfolioConstructor` ← `EqualWeightPortfolio`, `ExponentialWeightPortfolio`, `CostAdjustedPortfolio`, `InverseVolatilityPortfolio` (← `VolatilityTargetPortfolio`), `MeanVariancePortfolio`, `MinVariancePortfolio`, `MeanVarianceTurnoverPortfolio`, `RiskParityPortfolio`, `HRPPortfolio`, `KellyPortfolio`.
+
+Each class exposes a corresponding `long_short_*_portfolio()` functional wrapper that is registered in the `_portfolio_constructors` registry.
+
+Constraint adjusters (`qts/research/portfolio_construction/constraints.py`) apply after construction and are not registry-backed: `apply_weight_constraints`, `apply_factor_neutrality`, `apply_volatility_cap`, `apply_correlation_penalty`, `apply_liquidity_cap`.
+
 #### Features
 
 - `FeaturePipeline.fit_transform()` always starts with `preprocess_ohlcv()`
@@ -174,10 +185,32 @@ Registered signal algorithm keys (`factor` family):
 - `factor_as_signal`
 - `ic_weighted`
 
+Registered factor trainer keys:
+
+- `xgb_regressor` — XGBoost regressor trainer (factor family)
+- `xgb_ranker` — XGBoost learning-to-rank trainer (factor family)
+- `ic_composite` — IC-weighted composite trainer (factor family)
+- `xgb_classifier` — XGBoost classifier trainer (ml_factor family)
+
+Registered portfolio constructor keys:
+
+- `equal_weight`, `exponential_weight`, `inverse_volatility`, `volatility_target`
+- `mean_variance`, `min_variance`, `mean_variance_turnover`
+- `risk_parity`, `hrp`, `kelly`, `cost_adjusted`
+
+Portfolio constraint helpers (not registry-backed, imported directly):
+
+- `apply_weight_constraints`, `apply_factor_neutrality`, `apply_volatility_cap`
+- `apply_correlation_penalty`, `apply_liquidity_cap`
+
 Registered spread model keys (`stat_arb` family):
 
 - `ols`
 - `rolling_ols`
+
+Registered signal rule keys (`stat_arb` family):
+
+- `zscore_threshold` — z-score band entry/exit rule
 
 Registered ML model keys (`ml_factor` family):
 
@@ -191,9 +224,17 @@ Registered ML model keys (`ml_factor` family):
 Refactor direction for strategy families:
 
 - Keep `BaseStrategy.generate_signals(data) -> SignalFrame` as the stable public strategy seam.
-- Family-level `base.py` and `core.py` modules are justified only when a family has real shared behavior.
-- `factor/` and `stat_arb/` are the two earned families for this structure today.
-- Do not add `cross_sectional/base.py` or `cross_sectional/core.py` until the first concrete cross-sectional strategy exists.
+- Each concrete strategy family under `qts/research/strategies/` follows the same spine:
+  `base.py` for the family interface, `factories.py` for registry side effects, and one
+  concrete strategy per descriptive module such as `rank.py`, `classification.py`,
+  `mean_reversion.py`, or `quantamental.py`.
+- Compatibility import shims such as `model.py`, `strategy.py`, and `base_model.py` are not
+  part of the supported strategy surface.
+- Learning-based collaborators live below the owning family, for example
+  `ml_factor/models/`; models expose `fit()` / `predict()` and never own
+  `generate_signals()`.
+- Strategy packages do not own data loading. Strategy-specific data assembly belongs in
+  `qts/data/` or feature construction, then strategies consume normalized frames.
 - Stat-arb should conform to the same seam as every other strategy: consume a universe frame and emit a standard signal frame across traded symbols.
 
 #### Backtesting
@@ -210,9 +251,7 @@ Registered engine keys:
 | Key | Class | Notes |
 |---|---|---|
 | `vectorbt` | `VectorBTProEngine` | Vectorized target-percent simulation |
-| `fast` | `VectorBTProEngine` | Alias for `vectorbt` |
 | `zipline` | `ZiplineReloadedEngine` | Calendar-aware zipline-reloaded simulation |
-| `normal` | `ZiplineEngine` | Compatibility engine class; YAML config loader currently normalizes `normal` -> `zipline` |
 
 Simulation model registrations:
 
@@ -268,6 +307,7 @@ Current flow behavior:
 
 - `qts_flow()` builds runtime collaborators from `ResolvedConfig`, downloads `stock`, `vn_stock`, `vn_warrant`, and spot `crypto` OHLCV plus `vn_futures` and `crypto_futures` data when configured, binds fundamentals into a copied feature pipeline only when required, then runs research or live execution logic.
 - `data_fetch_flow()` resolves requested asset classes through shared symbol-routing helpers, including `vn_warrant`, `vn_futures`, and `crypto_futures`, and uses the same `DataManager` assembly path as the main flow.
+- `download_vn_futures_intraday_ohlcv()` is the narrow task-level entrypoint for fetching configured `VNF:` futures at `1h`, `15m`, and `30m`; the default demo config uses the KBS-backed `vnstock_futures` source, which translates `VNF:VN30F1M` to the concrete KBS front-month contract while storing the canonical QTS symbol. DataManager stores these rows in `vn_futures_intraday_prices` keyed by `symbol`, `interval`, and `bar_time`.
 
 `prefect_compat.py` provides a fallback `flow`, `task`, and `serve` shim when Prefect is not installed.
 
@@ -299,7 +339,7 @@ Refactor direction:
 - Package bootstrap should import strategy families, not a hand-picked set of concrete strategy modules.
 - Registry-backed strategies should all resolve after package import, including `ml_factor`.
 - Built-in features and storage should resolve through the same registries as the rest of the plugin surface.
-- YAML compatibility stays intact during this cleanup: `strategy.type`, `strategy.params`, `backtest_engine`, and the existing feature booleans remain valid.
+- Canonical YAML keys remain `strategy.type`, `strategy.params`, `backtest_engine`, and the existing feature booleans.
 
 ## End-to-End Data Path
 
@@ -311,6 +351,7 @@ config_path
   -> build_data_manager()
   -> download_ohlcv()
   -> optional download_futures_ohlcv()
+  -> optional download_vn_futures_intraday_ohlcv() for data refresh/demo workflows
   -> optional download_fundamentals()
   -> feature_pipeline.with_fundamentals()
   -> FeaturePipeline.fit_transform()
@@ -329,7 +370,7 @@ config_path
   -> run_backtest()
   -> latest target weights
   -> PositionSync.compute_deltas()
-  -> build_order_router()
+  -> OrderRouter(resolved brokers)
   -> OrderRouter.execute()
 ```
 

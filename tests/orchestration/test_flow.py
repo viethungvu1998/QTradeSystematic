@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import polars as pl
@@ -14,7 +14,11 @@ from qts.data.sources.fmp import FMPDataSource
 from qts.orchestration.flow import qts_flow
 from qts.orchestration.flows.data_fetch_flow import data_fetch_flow
 from qts.orchestration.runtime import resolved_brokers
-from qts.orchestration.tasks.data_tasks import download_futures_ohlcv, download_ohlcv
+from qts.orchestration.tasks.data_tasks import (
+    download_futures_ohlcv,
+    download_ohlcv,
+    download_vn_futures_intraday_ohlcv,
+)
 
 
 async def test_qts_flow_research_and_live(
@@ -219,6 +223,61 @@ async def test_download_tasks_include_vn_warrants_and_vn_futures():
             DataType.FUTURES_OHLCV,
             ["VNF:VN30F1M"],
             {"start": date(2024, 1, 1), "end": date(2024, 3, 20)},
+        ),
+    ]
+
+
+async def test_download_vn_futures_intraday_ohlcv_fetches_required_intervals():
+    calls = []
+
+    class FakeManager:
+        async def get(self, data_type, symbols, **kwargs):
+            calls.append((data_type, list(symbols), kwargs))
+            return pl.DataFrame(
+                {
+                    "bar_time": [datetime(2024, 1, 2, 9, 0)],
+                    "date": [date(2024, 1, 2)],
+                    "symbol": [symbols[0]],
+                    "interval": [kwargs["interval"]],
+                    "open": [1_250.0],
+                    "high": [1_251.0],
+                    "low": [1_249.0],
+                    "close": [1_250.5],
+                    "volume": [1_000.0],
+                }
+            )
+
+    config = SimpleNamespace(
+        universe=SimpleNamespace(
+            stock=[],
+            vn_stock=[],
+            vn_warrant=[],
+            vn_futures=["VNF:VN30F1M"],
+            crypto=[],
+            crypto_futures=[],
+        ),
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 2),
+    )
+
+    result = await download_vn_futures_intraday_ohlcv(config, FakeManager())
+
+    assert result.height == 3
+    assert calls == [
+        (
+            DataType.FUTURES_OHLCV,
+            ["VNF:VN30F1M"],
+            {"start": date(2024, 1, 2), "end": date(2024, 1, 2), "interval": "1h"},
+        ),
+        (
+            DataType.FUTURES_OHLCV,
+            ["VNF:VN30F1M"],
+            {"start": date(2024, 1, 2), "end": date(2024, 1, 2), "interval": "15m"},
+        ),
+        (
+            DataType.FUTURES_OHLCV,
+            ["VNF:VN30F1M"],
+            {"start": date(2024, 1, 2), "end": date(2024, 1, 2), "interval": "30m"},
         ),
     ]
 

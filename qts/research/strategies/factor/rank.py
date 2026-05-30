@@ -1,4 +1,4 @@
-"""Factor model strategy."""
+"""Cross-sectional factor ranking strategy."""
 
 from __future__ import annotations
 
@@ -10,17 +10,9 @@ import pandas as pd
 import polars as pl
 
 from qts.core.registry import Registry
+from qts.research.strategies._config import resolve_named_section
 
 from .base import BaseFactorStrategy
-
-
-def _resolve_named_section(raw: object, section_name: str) -> dict:
-    """Normalise a YAML sub-section into {'name': str, 'params': dict}."""
-    if isinstance(raw, str):
-        return {"name": raw, "params": {}}
-    if isinstance(raw, dict):
-        return {"name": str(raw["name"]), "params": dict(raw.get("params", {}))}
-    raise ValueError(f"Cannot resolve {section_name!r} section from {raw!r}")
 
 
 @Registry.register_strategy("factor")
@@ -49,22 +41,21 @@ class FactorStrategy(BaseFactorStrategy):
         portfolio_func: Callable | None = None,
     ) -> FactorStrategy:
         payload = dict(params)
-
         predictor_cols = [str(column) for column in payload.pop("predictor_cols", [])]
 
         algorithm_raw = payload.pop("algorithm", {"name": "cross_sectional_rank"})
-        algorithm_cfg = _resolve_named_section(algorithm_raw, "algorithm")
-        algorithm_fn = Registry.get_signal_algorithm(algorithm_cfg["name"])
+        algorithm_cfg = resolve_named_section(algorithm_raw, "algorithm")
+        algorithm_fn = Registry.get_signal_algorithm(str(algorithm_cfg["name"]))
         algorithm_func = partial(
             algorithm_fn,
             predictor_cols=predictor_cols,
-            **algorithm_cfg["params"],
+            **dict(algorithm_cfg["params"]),
         )
 
         if portfolio_func is None and "portfolio" in payload:
-            portfolio_raw = _resolve_named_section(payload.pop("portfolio"), "portfolio")
-            port_fn = Registry.get_portfolio_constructor(portfolio_raw["name"])
-            portfolio_func = partial(port_fn, **portfolio_raw["params"])
+            portfolio_raw = resolve_named_section(payload.pop("portfolio"), "portfolio")
+            port_fn = Registry.get_portfolio_constructor(str(portfolio_raw["name"]))
+            portfolio_func = partial(port_fn, **dict(portfolio_raw["params"]))
         else:
             payload.pop("portfolio", None)
 
@@ -105,7 +96,9 @@ class FactorStrategy(BaseFactorStrategy):
                 for column, alias in zip(feature_columns, zscore_columns, strict=True)
             ]
         ).with_columns(
-            (sum(pl.col(column) for column in zscore_columns) / len(zscore_columns)).alias("factor_score")
+            (sum(pl.col(column) for column in zscore_columns) / len(zscore_columns)).alias(
+                "factor_score"
+            )
         )
         rows: list[dict[str, object]] = []
         for item in scored.partition_by("date", as_dict=False):
@@ -128,3 +121,6 @@ class FactorStrategy(BaseFactorStrategy):
         if not rows:
             return self.empty_signal_frame()
         return self.validate_signal_frame(pl.DataFrame(rows))
+
+
+__all__ = ["FactorStrategy"]

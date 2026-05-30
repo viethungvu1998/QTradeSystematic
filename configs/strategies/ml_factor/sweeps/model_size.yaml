@@ -16,15 +16,30 @@ sweep:
     metric: sharpe
     direction: maximize
   search_space:
-    - path: strategy.params.trainer.params.model_params.n_estimators
+    - path: strategy.params.model.params.n_estimators
       type: int
       low: 25
       high: 150
       step: 25
-    - path: strategy.params.trainer.params.model_params.max_depth
+    - path: strategy.params.model.params.max_depth
       type: int
       low: 2
       high: 6
+    - path: strategy.params.model.params.learning_rate
+      type: float
+      low: 0.005
+      high: 0.2
+      log: true
+    - path: strategy.params.model.params.subsample
+      type: float
+      low: 0.6
+      high: 1.0
+      step: 0.05
+    - path: strategy.params.model.params.colsample_bytree
+      type: float
+      low: 0.6
+      high: 1.0
+      step: 0.05
     - path: strategy.params.rebalance_period
       type: int
       low: 6
