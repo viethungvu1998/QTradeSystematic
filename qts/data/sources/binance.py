@@ -52,6 +52,10 @@ def _date_to_ms(d: date) -> int:
     return int(datetime(d.year, d.month, d.day, tzinfo=UTC).timestamp() * 1000)
 
 
+def _is_intraday(interval: str) -> bool:
+    return interval.lower() not in {"1d", "1w", "1mo"}
+
+
 def _klines_to_frame(symbol: str, rows: list) -> pl.DataFrame:
     if not rows:
         return pl.DataFrame(
@@ -69,6 +73,36 @@ def _klines_to_frame(symbol: str, rows: list) -> pl.DataFrame:
     return pl.DataFrame({
         "date": dates,
         "symbol": [symbol] * len(rows),
+        "open": [float(r[1]) for r in rows],
+        "high": [float(r[2]) for r in rows],
+        "low": [float(r[3]) for r in rows],
+        "close": [float(r[4]) for r in rows],
+        "volume": [float(r[5]) for r in rows],
+    })
+
+
+def _klines_to_intraday_frame(symbol: str, rows: list, interval: str) -> pl.DataFrame:
+    """Build FUTURES_INTRADAY_OHLCV_COLUMNS frame preserving full bar_time for intraday intervals."""
+    if not rows:
+        return pl.DataFrame(
+            schema={
+                "bar_time": pl.Datetime,
+                "date": pl.Date,
+                "symbol": pl.Utf8,
+                "interval": pl.Utf8,
+                "open": pl.Float64,
+                "high": pl.Float64,
+                "low": pl.Float64,
+                "close": pl.Float64,
+                "volume": pl.Float64,
+            }
+        )
+    bar_times = [datetime.fromtimestamp(r[0] / 1000, tz=UTC).replace(tzinfo=None) for r in rows]
+    return pl.DataFrame({
+        "bar_time": bar_times,
+        "date": [bt.date() for bt in bar_times],
+        "symbol": [symbol] * len(rows),
+        "interval": [interval] * len(rows),
         "open": [float(r[1]) for r in rows],
         "high": [float(r[2]) for r in rows],
         "low": [float(r[3]) for r in rows],
@@ -252,6 +286,8 @@ class BinanceFuturesDataSource(BaseDataSource):
             )
         except Exception as exc:
             raise DataSourceError(str(exc), symbol, (start, end)) from exc
+        if _is_intraday(interval):
+            return _klines_to_intraday_frame(symbol, rows, interval)
         return _klines_to_frame(symbol, rows)
 
     async def get_fundamentals(self, symbol: str) -> pl.DataFrame:

@@ -13,6 +13,7 @@ from qts.core.registry import Registry
 from qts.research.strategies._config import resolve_named_section
 from qts.research.strategies.factor.base import BaseFactorStrategy
 from qts.utils.dataframe import drop_non_numeric_nulls
+from qts.utils.labels import MLFactorClassThresholds
 from qts.utils.time_series import time_series_cv_splits, unique_sorted_timestamps
 from qts.utils.validation import (
     min_int,
@@ -29,7 +30,6 @@ from .constants import (
     LEGACY_REGRESSION_TRAINERS,
     TARGET_PREFIXES,
 )
-from .labels import MLFactorClassThresholds
 from .models.base import BaseMLFactorModel
 
 

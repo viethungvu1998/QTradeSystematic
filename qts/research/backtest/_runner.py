@@ -64,10 +64,14 @@ def walk_forward_signals(
         featured = pipeline.fit_transform(train_slice)
         if featured.is_empty():
             continue
-        last_date = featured["date"].max()
+        generated = strategy.generate_signals(featured)
+        if generated.is_empty():
+            continue
+        # Use the max date from generated signals to match its date dtype (Date or Datetime).
+        last_signal_date = generated["date"].max()
         signals_for_date = (
-            strategy.generate_signals(featured)
-            .filter(pl.col("date") == last_date)
+            generated
+            .filter(pl.col("date") == last_signal_date)
             .with_columns(pl.lit(rebalance_date).alias("date"))
         )
         if not signals_for_date.is_empty():

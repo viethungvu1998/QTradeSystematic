@@ -7,7 +7,7 @@ import pytest
 
 from qts.config.builder import Config
 from qts.config.loader import load_config_from_mapping
-from qts.research.strategies.ml_factor.classification import MLFactorStrategy
+from qts.research.strategies.ml_factor.strategy import MLFactorStrategy
 
 
 def _research_mapping() -> dict[str, object]:

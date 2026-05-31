@@ -1,4 +1,4 @@
-"""Tests for strategies.ml_factor.classification."""
+"""Tests for strategies.ml_factor.strategy."""
 
 from __future__ import annotations
 
@@ -12,20 +12,20 @@ import polars as pl
 import pytest
 
 from qts.core.registry import Registry
-from qts.research.strategies.ml_factor.classification import MLFactorStrategy
 from qts.research.strategies.ml_factor.constants import (
     CLASS_PERCENTILES,
     ML_FACTOR_CLASS_COUNT,
     ML_FACTOR_CLASS_SCORES,
 )
-from qts.research.strategies.ml_factor.labels import (
-    MLFactorClass,
-    MLFactorClassThresholds,
-    class_scores_from_probabilities,
-)
 from qts.research.strategies.ml_factor.models.xgb import (
     XGBClassifierModel,
     train_and_predict_xgb_classifier,
+)
+from qts.research.strategies.ml_factor.strategy import MLFactorStrategy
+from qts.utils.labels import (
+    MLFactorClass,
+    MLFactorClassThresholds,
+    class_scores_from_probabilities,
 )
 from qts.utils.metrics import multiclass_classification_metrics
 

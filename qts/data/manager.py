@@ -46,6 +46,7 @@ class DataManager:
         vn_futures_intraday_table: str = "vn_futures_intraday_prices",
         crypto_table: str = "crypto_prices",
         futures_table: str = "futures_prices",
+        crypto_futures_intraday_table: str = "crypto_futures_intraday_prices",
         bundle_name: str = "qts-stock-bundle",
     ) -> None:
         self.storage = storage
@@ -58,6 +59,7 @@ class DataManager:
         self.vn_futures_intraday_table = vn_futures_intraday_table
         self.crypto_table = crypto_table
         self.futures_table = futures_table
+        self.crypto_futures_intraday_table = crypto_futures_intraday_table
         self.bundle_name = bundle_name
 
         source_map: dict[AssetType, BaseDataSource] = {}
@@ -223,7 +225,8 @@ class DataManager:
 
     def _db_lookup(self, table: str, symbol: str, data_type: DataType, **kwargs) -> pl.DataFrame:
         conditions = [f"symbol = '{symbol}'"]
-        if table == self.vn_futures_intraday_table and kwargs.get("interval") is not None:
+        intraday_tables = {self.vn_futures_intraday_table, self.crypto_futures_intraday_table}
+        if table in intraday_tables and kwargs.get("interval") is not None:
             conditions.append(f"interval = '{kwargs['interval']}'")
         time_column = TIME_COLUMN[data_type]
         if time_column is not None:
@@ -251,12 +254,11 @@ class DataManager:
         return list(dict.fromkeys(expanded))
 
     def _table_name(self, asset_type: AssetType, data_type: DataType, **kwargs) -> str:
-        if (
-            asset_type is AssetType.VN_FUTURES
-            and data_type is DataType.FUTURES_OHLCV
-            and self._is_intraday_interval(kwargs.get("interval", "1d"))
-        ):
-            return self.vn_futures_intraday_table
+        if data_type is DataType.FUTURES_OHLCV and self._is_intraday_interval(kwargs.get("interval", "1d")):
+            if asset_type is AssetType.VN_FUTURES:
+                return self.vn_futures_intraday_table
+            if asset_type is AssetType.CRYPTO_FUTURES:
+                return self.crypto_futures_intraday_table
         return self._table_map.get((asset_type, data_type), data_type.value)
 
     def price_history_table(self, symbol: str) -> str | None:
@@ -330,7 +332,8 @@ class DataManager:
         data_type: DataType,
         kwargs: dict,
     ) -> pl.DataFrame:
-        if table != self.vn_futures_intraday_table or frame.height == 0:
+        intraday_tables = {self.vn_futures_intraday_table, self.crypto_futures_intraday_table}
+        if table not in intraday_tables or frame.height == 0:
             return frame
         if "bar_time" not in frame.columns:
             start = kwargs.get("start")

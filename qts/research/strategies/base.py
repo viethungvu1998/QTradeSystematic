@@ -32,8 +32,15 @@ class BaseStrategy(ABC):
         if missing:
             raise ValueError(f"Missing signal columns: {sorted(missing)}")
 
+        # Preserve Datetime for intraday signals; cast everything else to Date.
+        date_dtype = frame.schema.get("date")
+        date_cast = (
+            []
+            if (date_dtype is not None and date_dtype.base_type() == pl.Datetime)
+            else [pl.col("date").cast(pl.Date)]
+        )
         normalized = frame.select(SIGNAL_COLUMNS).with_columns(
-            pl.col("date").cast(pl.Date),
+            *date_cast,
             pl.col("symbol").cast(pl.String),
             pl.col("signal").cast(pl.Int32),
             pl.col("weight").cast(pl.Float64),

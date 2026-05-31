@@ -152,6 +152,13 @@ class VectorBTProEngine(BaseEngine):
         size_matrix = target_schedule.events
 
         # 4. Run vectorized simulation via from_orders (supports TargetPercent)
+        # Infer bar frequency from the close index so annualised metrics are correct
+        # for both daily and intraday (e.g. hourly) data.
+        inferred_freq: str | None = None
+        if len(close_wide.index) > 1:
+            delta = close_wide.index[1] - close_wide.index[0]
+            inferred_freq = pd.tseries.frequencies.to_offset(delta)
+
         pf = vbt.Portfolio.from_orders(
             close=close_wide,
             size=size_matrix,
@@ -166,7 +173,7 @@ class VectorBTProEngine(BaseEngine):
             cash_sharing=True,
             group_by=True,
             init_cash=float(config.initial_capital or Decimal("100000")),
-            freq="1D",
+            freq=inferred_freq,
         )
 
         # 5. Package into BacktestResult

@@ -21,55 +21,68 @@ def _true_range_expr() -> pl.Expr:
 
 @Registry.register_feature("atr")
 class ATRFeature(BaseFeature):
-    """Average true range."""
+    """Average true range. Set normalize=True to output ATR / close instead of raw ATR."""
 
-    def __init__(self, periods: list[int] | tuple[int, ...] = (14,)) -> None:
+    def __init__(self, periods: list[int] | tuple[int, ...] = (14,), normalize: bool = False) -> None:
         self.periods = list(periods)
+        self.normalize = normalize
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         result = df.sort(["symbol", "date"]).with_columns(_true_range_expr().alias("_true_range"))
         for period in self.periods:
-            result = result.with_columns(
+            raw_atr = (
                 pl.col("_true_range")
                 .ewm_mean(alpha=1 / period, adjust=False, min_samples=period)
                 .over("symbol")
-                .alias(f"atr_{period}")
             )
+            col_name = f"atr_norm_{period}" if self.normalize else f"atr_{period}"
+            expr = (raw_atr / (pl.col("close") + 1e-8)) if self.normalize else raw_atr
+            result = result.with_columns(expr.alias(col_name))
         result = result.drop("_true_range")
         return self._validate_append_only(df, result)
 
 
 @Registry.register_feature("bollinger")
 class BollingerFeature(BaseFeature):
-    """Bollinger bands."""
+    """Bollinger bands. Accepts a single window or a list of windows.
+    When pct_b=True outputs bb_pct_b_{window} (position within bands, clipped [0,1]).
+    When pct_b=False (default) outputs bb_mid, bb_upper, bb_lower per window.
+    """
 
-    def __init__(self, window: int = 20, n_std: float = 2.0) -> None:
-        self.window = window
+    def __init__(self, window: int | list[int] = 20, n_std: float = 2.0, pct_b: bool = False) -> None:
+        self.windows = [window] if isinstance(window, int) else list(window)
         self.n_std = n_std
+        self.pct_b = pct_b
+
+    def _compute_window(self, df: pl.DataFrame, w: int) -> pl.DataFrame:
+        result = (
+            df
+            .with_columns(
+                pl.col("close").rolling_mean(w, min_samples=w).over("symbol").alias("_bmid"),
+                pl.col("close").rolling_std(w, min_samples=w, ddof=0).over("symbol").alias("_bstd"),
+            )
+            .with_columns(
+                (pl.col("_bmid") + self.n_std * pl.col("_bstd")).alias("_bup"),
+                (pl.col("_bmid") - self.n_std * pl.col("_bstd")).alias("_blo"),
+            )
+        )
+        if self.pct_b:
+            result = result.with_columns(
+                ((pl.col("close") - pl.col("_blo")) / (pl.col("_bup") - pl.col("_blo") + 1e-8))
+                .clip(0.0, 1.0).alias(f"bb_pct_b_{w}")
+            )
+        else:
+            result = result.with_columns(
+                pl.col("_bmid").alias(f"bb_mid_{w}"),
+                pl.col("_bup").alias(f"bb_upper_{w}"),
+                pl.col("_blo").alias(f"bb_lower_{w}"),
+            )
+        return result.drop(["_bmid", "_bstd", "_bup", "_blo"])
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
-        result = (
-            df.sort(["symbol", "date"])
-            .with_columns(
-                pl.col("close")
-                .rolling_mean(self.window, min_samples=self.window)
-                .over("symbol")
-                .alias(f"bb_mid_{self.window}"),
-                pl.col("close")
-                .rolling_std(self.window, min_samples=self.window, ddof=0)
-                .over("symbol")
-                .alias("_bb_std"),
-            )
-            .with_columns(
-                (pl.col(f"bb_mid_{self.window}") + (self.n_std * pl.col("_bb_std"))).alias(
-                    f"bb_upper_{self.window}"
-                ),
-                (pl.col(f"bb_mid_{self.window}") - (self.n_std * pl.col("_bb_std"))).alias(
-                    f"bb_lower_{self.window}"
-                ),
-            )
-            .drop("_bb_std")
-        )
+        result = df.sort(["symbol", "date"])
+        for w in self.windows:
+            result = self._compute_window(result, w)
         return self._validate_append_only(df, result)
 
 

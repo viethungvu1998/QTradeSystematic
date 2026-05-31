@@ -1,4 +1,4 @@
-"""ML factor class labels and probability scoring."""
+"""Reusable label schemes and probability scoring helpers."""
 
 from __future__ import annotations
 
@@ -20,12 +20,10 @@ from qts.utils.classification import (
 )
 from qts.utils.metrics import normalize_class_probabilities
 
-from .constants import (
-    CLASS_LABEL_COLUMN,
-    CLASS_PERCENTILES,
-    ML_FACTOR_CLASS_COUNT,
-    ML_FACTOR_CLASS_SCORES,
-)
+CLASS_PERCENTILES = (0.15, 0.40, 0.60, 0.85)
+CLASS_LABEL_COLUMN = "ml_factor_class"
+ML_FACTOR_CLASS_COUNT = 5
+ML_FACTOR_CLASS_SCORES = np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=float)
 
 
 class MLFactorClass(IntEnum):

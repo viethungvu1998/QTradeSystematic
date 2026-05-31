@@ -14,13 +14,13 @@ from qts.research.strategies.ml_factor.constants import (
     FORBIDDEN_PREDICTOR_PREFIXES,
     TARGET_PREFIXES,
 )
-from qts.research.strategies.ml_factor.labels import (
+from qts.utils.dataframe import drop_non_numeric_nulls, to_pandas_frame
+from qts.utils.labels import (
     MLFactorClass,
     MLFactorClassThresholds,
     align_class_probabilities,
     class_scores_from_probabilities,
 )
-from qts.utils.dataframe import drop_non_numeric_nulls, to_pandas_frame
 from qts.utils.time_series import time_series_cv_splits
 from qts.utils.validation import (
     min_int,

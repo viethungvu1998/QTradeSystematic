@@ -1,0 +1,186 @@
+workflow: research
+asset_types: [crypto_futures]
+
+universe:
+  crypto_futures:
+    - "PERP:1000SHIB/USDT"
+    - "PERP:1000XEC/USDT"
+    - "PERP:1INCH/USDT"
+    - "PERP:AAVE/USDT"
+    - "PERP:ADA/USDT"
+    - "PERP:ALGO/USDT"
+    - "PERP:ALICE/USDT"
+    - "PERP:ANKR/USDT"
+    - "PERP:AR/USDT"
+    - "PERP:ARPA/USDT"
+    - "PERP:ATOM/USDT"
+    - "PERP:AVAX/USDT"
+    - "PERP:AXS/USDT"
+    - "PERP:BAND/USDT"
+    - "PERP:BAT/USDT"
+    - "PERP:BCH/USDT"
+    - "PERP:BEL/USDT"
+    - "PERP:BNB/USDT"
+    - "PERP:BTC/USDT"
+    - "PERP:C98/USDT"
+    - "PERP:CELO/USDT"
+    - "PERP:CELR/USDT"
+    - "PERP:CHZ/USDT"
+    - "PERP:COMP/USDT"
+    - "PERP:CRV/USDT"
+    - "PERP:DASH/USDT"
+    - "PERP:DOGE/USDT"
+    - "PERP:DOT/USDT"
+    - "PERP:ETC/USDT"
+    - "PERP:ETH/USDT"
+    - "PERP:FIL/USDT"
+    - "PERP:GRT/USDT"
+    - "PERP:HBAR/USDT"
+    - "PERP:ICX/USDT"
+    - "PERP:IOST/USDT"
+    - "PERP:IOTA/USDT"
+    - "PERP:KAVA/USDT"
+    - "PERP:KNC/USDT"
+    - "PERP:KSM/USDT"
+    - "PERP:LINK/USDT"
+    - "PERP:LTC/USDT"
+    - "PERP:MANA/USDT"
+    - "PERP:NEAR/USDT"
+    - "PERP:NEO/USDT"
+    - "PERP:ONE/USDT"
+    - "PERP:ONT/USDT"
+    - "PERP:QTUM/USDT"
+    - "PERP:ROSE/USDT"
+    - "PERP:RSR/USDT"
+    - "PERP:RUNE/USDT"
+    - "PERP:RVN/USDT"
+    - "PERP:SAND/USDT"
+    - "PERP:SNX/USDT"
+    - "PERP:SOL/USDT"
+    - "PERP:SUSHI/USDT"
+    - "PERP:THETA/USDT"
+    - "PERP:TRX/USDT"
+    - "PERP:UNI/USDT"
+    - "PERP:VET/USDT"
+    - "PERP:XLM/USDT"
+    - "PERP:XRP/USDT"
+    - "PERP:XTZ/USDT"
+    - "PERP:YFI/USDT"
+    - "PERP:ZEC/USDT"
+    - "PERP:ZIL/USDT"
+    - "PERP:ZRX/USDT"
+
+start_date:      "2022-01-01"
+end_date:        "2025-12-31"
+test_start_date: "2025-10-01"
+initial_capital: 100000
+
+data_sources:
+  crypto_futures: binance_futures
+storage: duckdb
+
+features:
+  indicators:
+    # ── Momentum ────────────────────────────────────────────────────
+    - name: rsi
+      params: {periods: [7, 14, 21]}
+    - name: roc
+      params: {periods: [7, 14, 21]}
+    # ── Z-score of rolling log returns ──────────────────────────────
+    - name: zscore_ret
+      params: {windows: [7, 14, 21]}
+    # ── Trend ───────────────────────────────────────────────────────
+    - name: adx
+      params: {period: [7, 14, 21]}
+    # ── Volatility ──────────────────────────────────────────────────
+    - name: atr
+      params: {periods: [7, 14, 21], normalize: true}
+    - name: hist_vol
+      params: {periods: [7, 14, 21]}
+    - name: bollinger
+      params: {window: [7, 14, 21], n_std: 2.0, pct_b: true}
+    # ── Volume ──────────────────────────────────────────────────────
+    - name: volume_ratio
+      params: {window: [7, 14, 21]}
+    - name: obv
+      params: {}
+  forward_returns:
+    periods: [6]   # 6-hour forward return on hourly data
+
+strategy:
+  type: ml_factor
+  params:
+    predictor_cols:
+      # RSI × 3 windows
+      - rsi_7
+      - rsi_14
+      - rsi_21
+      # ROC × 3 windows
+      - roc_7
+      - roc_14
+      - roc_21
+      # Z-score of rolling returns × 3 windows
+      - zscore_ret_7
+      - zscore_ret_14
+      - zscore_ret_21
+      # ADX × 3 windows
+      - adx_7
+      - adx_14
+      - adx_21
+      # ATR (normalised) × 3 windows
+      - atr_norm_7
+      - atr_norm_14
+      - atr_norm_21
+      # Historical volatility × 3 windows
+      - hist_vol_7
+      - hist_vol_14
+      - hist_vol_21
+      # Bollinger %B × 3 windows
+      - bb_pct_b_7
+      - bb_pct_b_14
+      - bb_pct_b_21
+      # Volume ratio × 3 windows
+      - vol_ratio_7
+      - vol_ratio_14
+      - vol_ratio_21
+      # OBV (raw cumulative)
+      - obv
+    target_col: forward_return_6
+    task: classification
+    rebalance_period: 6       # rebalance every 6 hourly bars
+    min_train_rows: 500
+    cv_splits: 3
+    cv_gap: 6                 # 6-hour gap between train and test folds
+    cv_test_size: 168         # 7 days × 24 hours
+    cv_max_train_size: 2880   # rolling 120-day window (120 × 24 = 2880 hourly bars)
+    model:
+      name: xgb_classifier
+      params:
+        n_estimators: 300
+        max_depth: 5
+        learning_rate: 0.05
+        subsample: 0.8
+        colsample_bytree: 0.8
+        min_child_weight: 5
+        eval_metric: mlogloss
+        random_state: 42
+        n_jobs: -1
+
+portfolio_construction:
+  name: equal_weight
+  params:
+    num_long_positions: 3    # top-3 STRONG_BULL by score
+    num_short_positions: 3   # bottom-3 STRONG_BEAR by score
+
+backtest_engine: vectorbt
+
+# 120 days × 24 hours = 2880 hourly bars rolling training window
+train_window: 2880
+# Rebalance every 6 bars (= every 6 hours on 1h data)
+rebalance_frequency: 6
+
+commission:
+  model: percentage
+  rate: 0.0005   # taker fee; maker (0.0002) on scheduled rebalance exits handled separately
+
+benchmark: "PERP:BTC/USDT"

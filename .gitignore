@@ -10,3 +10,5 @@ docker/env/*.env
 .qts_notebook_runtime
 
 .claude/worktrees
+data/csv/
+data/cache/
