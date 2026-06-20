@@ -14,8 +14,8 @@ FUTURES_INTRADAY_OHLCV_COLUMNS = [
     "high",
     "low",
     "close",
-    "volume",
-]
+        "volume",
+    ]
 
 
 class DataType(StrEnum):

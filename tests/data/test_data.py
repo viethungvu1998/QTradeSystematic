@@ -14,7 +14,13 @@ from qts.data.manager import DataManager
 from qts.data.sources.binance import BinanceDataSource, BinanceFuturesDataSource
 from qts.data.sources.dnse import DNSEDataSource
 from qts.data.sources.fmp import FMPDataSource
-from qts.data.sources.vnstock import VnstockDataSource, VnstockFuturesDataSource
+from qts.data.sources.vnstock import (
+    _KBS_ETF_LIST,
+    _FUNDAMENTALS_SCHEMA,
+    VnstockDataSource,
+    VnstockFuturesDataSource,
+    _KBSClient,
+)
 from qts.data.storage.duckdb import DuckDBStorage
 from qts.data.storage.parquet import ParquetStorage
 
@@ -86,6 +92,174 @@ def _vn_futures_intraday_fixture(symbol: str = "VNF:VN30F1M") -> pl.DataFrame:
                 }
             )
     return pl.DataFrame(rows)
+
+
+def _fundamentals_frame(
+    *,
+    symbol: str = "VN:VNM",
+    report_type: str = "KQKD",
+    period: str = "2025",
+    fiscal_year: int = 2025,
+    quarter: int | None = None,
+    report_date: date = date(2026, 2, 27),
+    item_en: str = "Revenue",
+    value: float = 123.0,
+) -> pl.DataFrame:
+    return pl.DataFrame(
+        [{
+            "symbol": symbol,
+            "report_type": report_type,
+            "period": period,
+            "fiscal_year": fiscal_year,
+            "quarter": quarter,
+            "report_date": report_date,
+            "item_en": item_en,
+            "value": value,
+        }],
+        schema=_FUNDAMENTALS_SCHEMA,
+    )
+
+
+class FakeKBSFundamentalsClient:
+    def __init__(self, frame: pl.DataFrame) -> None:
+        self.frame = frame
+        self.calls = 0
+
+    def get_all_financials(
+        self,
+        symbol: str,
+        termtype: int = 1,
+        pages: int = 3,
+    ) -> pl.DataFrame:
+        self.calls += 1
+        return self.frame
+
+
+class FakeVCIClient:
+    def __init__(
+        self,
+        *,
+        metadata: dict[str, dict[str, str]],
+        statement_rows: dict[str, list[dict]],
+        ratio_rows: list[dict],
+    ) -> None:
+        self.metadata = metadata
+        self.statement_rows = statement_rows
+        self.ratio_rows = ratio_rows
+        self.statement_requests: list[tuple[str, int, int]] = []
+        self.ratio_requests: list[tuple[int, int]] = []
+        self.metadata_calls = 0
+
+    def get_statement_metadata(self, symbol: str) -> dict[str, dict[str, str]]:
+        self.metadata_calls += 1
+        return self.metadata
+
+    def get_statement_rows(
+        self,
+        symbol: str,
+        section: str,
+        termtype: int,
+        limit: int,
+    ) -> list[dict]:
+        self.statement_requests.append((section, termtype, limit))
+        return self.statement_rows.get(section, [])
+
+    def get_ratio_rows(self, symbol: str, termtype: int, limit: int) -> list[dict]:
+        self.ratio_requests.append((termtype, limit))
+        return self.ratio_rows
+
+
+def _vci_metadata_fixture() -> dict[str, dict[str, str]]:
+    return {
+        "BALANCE_SHEET": {"bsa1": "Current assets"},
+        "INCOME_STATEMENT": {"isa1": "Sales"},
+        "CASH_FLOW": {"cfa1": "Net profit/(loss) before tax"},
+    }
+
+
+def _vci_annual_statement_rows() -> dict[str, list[dict]]:
+    return {
+        "BALANCE_SHEET": [{
+            "yearReport": 2025,
+            "lengthReport": 5,
+            "publicDate": "2026-02-27T00:00:00",
+            "bsa1": 1000,
+            "organCode": "VNM",
+            "ticker": "VNM",
+        }],
+        "INCOME_STATEMENT": [{
+            "yearReport": 2025,
+            "lengthReport": 5,
+            "createDate": "2026-01-30T12:00:00",
+            "isa1": 2000,
+        }],
+        "CASH_FLOW": [{
+            "yearReport": 2025,
+            "lengthReport": 5,
+            "updateDate": "2026-02-15T09:30:00",
+            "cfa1": 3000,
+        }],
+    }
+
+
+def _vci_quarterly_statement_rows() -> dict[str, list[dict]]:
+    return {
+        "BALANCE_SHEET": [{
+            "yearReport": 2025,
+            "lengthReport": 4,
+            "publicDate": "2026-01-30T00:00:00",
+            "bsa1": 1000,
+        }],
+        "INCOME_STATEMENT": [{
+            "yearReport": 2025,
+            "lengthReport": 4,
+            "publicDate": "2026-01-30T00:00:00",
+            "isa1": 2000,
+        }],
+        "CASH_FLOW": [{
+            "yearReport": 2025,
+            "lengthReport": 4,
+            "publicDate": "2026-01-30T00:00:00",
+            "cfa1": 3000,
+        }],
+    }
+
+
+def _vci_annual_ratio_rows() -> list[dict]:
+    return [{
+        "year": "2025",
+        "yearReport": 2025,
+        "quarter": 5,
+        "ratioYearId": 123,
+        "ratioTTMId": None,
+        "organCode": "VNM",
+        "pe": 15.2,
+        "pb": 2.1,
+    }]
+
+
+def _vci_quarterly_ratio_rows() -> list[dict]:
+    return [
+        {
+            "year": "2025",
+            "yearReport": 2025,
+            "quarter": 4,
+            "ratioYearId": None,
+            "ratioTTMId": None,
+            "organCode": "VNM",
+            "pe": 15.2,
+            "pb": 2.1,
+        },
+        {
+            "year": "2025",
+            "yearReport": 2025,
+            "quarter": 5,
+            "ratioYearId": 123,
+            "ratioTTMId": None,
+            "organCode": "VNM",
+            "pe": 16.2,
+        },
+    ]
 
 
 def test_data_type_and_capabilities():
@@ -448,6 +622,178 @@ async def test_vnstock_equity_fundamentals_fixture(vn_stock_ohlcv):
     source = VnstockDataSource(fundamentals_payloads={"VN:VNM": fundamentals})
     result = await source.get_fundamentals("VN:VNM")
     assert "pe" in result.columns
+
+
+def test_vnstock_rejects_unknown_fundamentals_source():
+    with pytest.raises(ValueError):
+        VnstockDataSource(fundamentals_source="unknown")
+
+
+@pytest.mark.asyncio
+async def test_vnstock_kbs_fundamentals_dispatch_and_schema_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr("qts.data.sources.vnstock.cache_dir", lambda: tmp_path)
+    frame = _fundamentals_frame()
+    client = FakeKBSFundamentalsClient(frame)
+    source = VnstockDataSource(client=client)
+
+    result = await source.get_fundamentals("VN:VNM", force_refresh=True)
+
+    assert client.calls == 1
+    assert result.equals(frame)
+
+
+@pytest.mark.asyncio
+async def test_vnstock_vci_annual_fundamentals_match_current_schema(tmp_path, monkeypatch):
+    monkeypatch.setattr("qts.data.sources.vnstock.cache_dir", lambda: tmp_path)
+    source = VnstockDataSource(
+        fundamentals_source="vci",
+        vci_client=FakeVCIClient(
+            metadata=_vci_metadata_fixture(),
+            statement_rows=_vci_annual_statement_rows(),
+            ratio_rows=_vci_annual_ratio_rows(),
+        ),
+    )
+
+    result = await source.get_fundamentals(
+        "VN:VNM",
+        termtype=1,
+        pages=1,
+        force_refresh=True,
+    )
+
+    assert result.columns == list(_FUNDAMENTALS_SCHEMA.keys())
+    assert result.dtypes == pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA).dtypes
+    assert set(result["report_type"].unique().to_list()) == {"CDKT", "CSTC", "KQKD", "LCTT"}
+    assert result["quarter"].null_count() == result.height
+    assert result["period"].unique().to_list() == ["2025"]
+    assert result["report_date"].null_count() == 0
+    assert set(result["item_en"].unique().to_list()) == {
+        "Current assets",
+        "Net profit/(loss) before tax",
+        "Sales",
+        "pb",
+        "pe",
+    }
+
+
+@pytest.mark.asyncio
+async def test_vnstock_vci_quarterly_fundamentals_match_current_schema(tmp_path, monkeypatch):
+    monkeypatch.setattr("qts.data.sources.vnstock.cache_dir", lambda: tmp_path)
+    source = VnstockDataSource(
+        fundamentals_source="vci",
+        vci_client=FakeVCIClient(
+            metadata=_vci_metadata_fixture(),
+            statement_rows=_vci_quarterly_statement_rows(),
+            ratio_rows=_vci_quarterly_ratio_rows(),
+        ),
+    )
+
+    result = await source.get_fundamentals(
+        "VN:VNM",
+        termtype=2,
+        pages=1,
+        force_refresh=True,
+    )
+
+    assert result.columns == list(_FUNDAMENTALS_SCHEMA.keys())
+    assert result.dtypes == pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA).dtypes
+    assert set(result["report_type"].unique().to_list()) == {"CDKT", "CSTC", "KQKD", "LCTT"}
+    assert result["quarter"].null_count() == 0
+    assert result["quarter"].unique().to_list() == [4]
+    assert result["period"].unique().to_list() == ["2025-Q4"]
+    assert result["report_date"].null_count() == 0
+    assert set(result["item_en"].unique().to_list()) == {
+        "Current assets",
+        "Net profit/(loss) before tax",
+        "Sales",
+        "pb",
+        "pe",
+    }
+
+
+@pytest.mark.asyncio
+async def test_vnstock_shared_fundamentals_cache_is_reused_across_sources(tmp_path, monkeypatch):
+    monkeypatch.setattr("qts.data.sources.vnstock.cache_dir", lambda: tmp_path)
+    cached = _fundamentals_frame(value=111.0)
+    kbs_client = FakeKBSFundamentalsClient(cached)
+    vci_client = FakeVCIClient(
+        metadata=_vci_metadata_fixture(),
+        statement_rows=_vci_annual_statement_rows(),
+        ratio_rows=_vci_annual_ratio_rows(),
+    )
+
+    kbs_source = VnstockDataSource(client=kbs_client)
+    await kbs_source.get_fundamentals("VN:VNM", force_refresh=True)
+
+    vci_source = VnstockDataSource(fundamentals_source="vci", vci_client=vci_client)
+    result = await vci_source.get_fundamentals("VN:VNM", force_refresh=False)
+
+    assert result.equals(cached)
+    assert vci_client.metadata_calls == 0
+    assert vci_client.statement_requests == []
+    assert vci_client.ratio_requests == []
+
+
+@pytest.mark.asyncio
+async def test_vnstock_force_refresh_overwrites_shared_cache_with_selected_provider(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("qts.data.sources.vnstock.cache_dir", lambda: tmp_path)
+    cached = _fundamentals_frame(value=111.0)
+    refreshed_client = FakeVCIClient(
+        metadata=_vci_metadata_fixture(),
+        statement_rows=_vci_annual_statement_rows(),
+        ratio_rows=_vci_annual_ratio_rows(),
+    )
+
+    kbs_source = VnstockDataSource(client=FakeKBSFundamentalsClient(cached))
+    await kbs_source.get_fundamentals("VN:VNM", force_refresh=True)
+
+    vci_source = VnstockDataSource(fundamentals_source="vci", vci_client=refreshed_client)
+    refreshed = await vci_source.get_fundamentals("VN:VNM", termtype=1, force_refresh=True)
+
+    cached_again = await kbs_source.get_fundamentals("VN:VNM", force_refresh=False)
+
+    assert refreshed_client.metadata_calls == 1
+    assert refreshed_client.statement_requests
+    assert refreshed_client.ratio_requests == [(1, 12)]
+    assert cached_again.equals(refreshed)
+
+
+def test_kbs_client_get_etfs_normalizes_listing_payload():
+    class FakeResponse:
+        def __init__(self, payload: object) -> None:
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> object:
+            return self.payload
+
+    class FakeHttp:
+        def __init__(self, payload: object) -> None:
+            self.payload = payload
+            self.urls: list[str] = []
+
+        def get(self, url: str):
+            self.urls.append(url)
+            return FakeResponse(self.payload)
+
+    http = FakeHttp(
+        {
+            "status": 200,
+            "data": ["e1vfvn30", "VN:FUEVFVND", {"symbol": "fuessv30"}, "E1VFVN30"],
+        }
+    )
+    client = object.__new__(_KBSClient)
+    client._http = http
+
+    symbols = client.get_etfs()
+
+    assert symbols == ["VN:E1VFVN30", "VN:FUESSV30", "VN:FUEVFVND"]
+    assert http.urls == [_KBS_ETF_LIST]
 
 
 @pytest.mark.asyncio

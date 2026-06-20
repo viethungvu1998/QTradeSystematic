@@ -1,8 +1,10 @@
-"""KBS (KB Securities) data source adapters for Vietnamese equity, warrants, and VN30 futures.
+"""VN data source adapters for Vietnamese equity, warrants, and VN30 futures.
 
-Calls the KB Securities IIS REST API directly — no third-party vnstock library required.
-Base URL: https://kbbuddywts.kbsec.com.vn/iis-server/investment
-Auth:     none (public endpoints, browser user-agent)
+Calls the KB Securities IIS REST API directly for OHLCV and supports both
+KBS and VCI for fundamentals — no third-party vnstock library required.
+KBS Base URL: https://kbbuddywts.kbsec.com.vn/iis-server/investment
+VCI Base URL: https://iq.vietcap.com.vn/api/iq-insight-service
+Auth:         none (public endpoints, browser user-agent)
 
 Fundamentals are stored in a tidy long-format cache:
   ~/.qts/cache/vn_fundamentals/{ticker}.parquet
@@ -31,6 +33,10 @@ from qts.utils.paths import cache_dir
 
 _KBS_BASE = "https://kbbuddywts.kbsec.com.vn/iis-server/investment"
 _KBS_FINANCE = f"{_KBS_BASE}/stock/finance-info"
+_KBS_ETF_LIST = f"{_KBS_BASE}/index/FUND/stocks"
+_VCI_PRICEBOARD = "https://trading.vietcap.com.vn/priceboard"
+_VCI_BASE = "https://iq.vietcap.com.vn/api/iq-insight-service"
+_VCI_FINANCIAL_STATEMENT = f"{_VCI_BASE}/v1/company"
 
 # Maps QTS interval strings to KBS endpoint suffixes.
 _INTERVAL_SUFFIX: dict[str, str] = {
@@ -51,6 +57,7 @@ _HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json",
+    "Referer": "https://trading.vietcap.com.vn/",
 }
 
 _EMPTY_OHLCV_SCHEMA = {
@@ -88,6 +95,23 @@ _FUNDAMENTALS_SCHEMA: dict[str, type[pl.DataType]] = {
 
 # KBS financial report types.
 _REPORT_TYPES = ("KQKD", "CDKT", "LCTT", "CSTC")
+_FUNDAMENTALS_SOURCES = frozenset({"kbs", "vci"})
+_VCI_SECTION_TO_REPORT_TYPE = {
+    "BALANCE_SHEET": "CDKT",
+    "INCOME_STATEMENT": "KQKD",
+    "CASH_FLOW": "LCTT",
+}
+_VCI_REPORT_DATE_FIELDS = ("publicDate", "createDate", "updateDate")
+_VCI_RATIO_EXCLUDED_FIELDS = frozenset({
+    "organCode",
+    "ticker",
+    "year",
+    "yearReport",
+    "quarter",
+    "ratioYearId",
+    "ratioTTMId",
+    "ratioType",
+})
 
 # Cache TTL in hours before a re-fetch is triggered.
 _FUNDAMENTALS_CACHE_TTL_HOURS = 24
@@ -223,6 +247,155 @@ def _rows_to_ohlcv(
     return pl.DataFrame(payload)
 
 
+def _to_qts_vn_stock_symbol(symbol: str) -> str:
+    raw = strip_vn_prefix(str(symbol).strip().upper())
+    if not raw:
+        raise ValueError("ETF symbol cannot be empty")
+    return f"VN:{raw}"
+
+
+def _symbol_from_etf_payload_item(item: object) -> str | None:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        for key in ("symbol", "SB", "sb"):
+            value = item.get(key)
+            if value:
+                return str(value)
+    return None
+
+
+def _parse_etf_symbols(payload: object) -> list[str]:
+    if isinstance(payload, dict):
+        raw_items = payload.get("data", [])
+    elif isinstance(payload, list):
+        raw_items = payload
+    else:
+        raise ValueError(f"Unsupported ETF listing response: {type(payload).__name__}")
+
+    symbols: list[str] = []
+    for item in raw_items:
+        symbol = _symbol_from_etf_payload_item(item)
+        if symbol:
+            symbols.append(_to_qts_vn_stock_symbol(symbol))
+    return sorted(dict.fromkeys(symbols))
+
+
+def _coerce_fiscal_year(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_quarter(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_numeric(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_api_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    raw = str(value).strip()
+    if len(raw) < 10:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def _period_end_date(year: int, quarter: int | None) -> date:
+    if quarter in {1, 2, 3, 4}:
+        month = quarter * 3
+        return date(year, month, calendar.monthrange(year, month)[1])
+    return date(year, 12, 31)
+
+
+def _termtype_period(year: int, termtype: int, quarter: int | None = None) -> tuple[str, int, int | None]:
+    if termtype == 1:
+        return str(year), year, None
+    if quarter not in {1, 2, 3, 4}:
+        raise ValueError(f"Invalid quarterly period metadata: {quarter}")
+    return f"{year}-Q{quarter}", year, quarter
+
+
+def _vci_report_date(row: dict, *, fallback: date | None = None) -> date | None:
+    for field in _VCI_REPORT_DATE_FIELDS:
+        parsed = _parse_api_date(row.get(field))
+        if parsed is not None:
+            return parsed
+    return fallback
+
+
+def _sort_vci_rows(rows: list[dict], termtype: int) -> list[dict]:
+    def key(row: dict) -> tuple[int, int]:
+        year = _coerce_fiscal_year(row.get("yearReport")) or 0
+        if termtype == 1:
+            quarter = 0
+        else:
+            quarter = _coerce_quarter(row.get("quarter")) or _coerce_quarter(row.get("lengthReport")) or 0
+        return (year, quarter)
+
+    return sorted(rows, key=key, reverse=True)
+
+
+def _select_vci_statement_rows(payload: dict, termtype: int, limit: int) -> list[dict]:
+    period_key = "years" if termtype == 1 else "quarters"
+    rows = payload.get("data", {}).get(period_key, [])
+    if not isinstance(rows, list):
+        return []
+    selected = _sort_vci_rows(rows, termtype)
+    return selected[:limit]
+
+
+def _select_vci_ratio_rows(rows: list[dict], termtype: int, limit: int) -> list[dict]:
+    selected: list[dict] = []
+    for row in rows:
+        year = _coerce_fiscal_year(row.get("yearReport"))
+        quarter = _coerce_quarter(row.get("quarter"))
+        if year is None or quarter is None:
+            continue
+        if termtype == 1 and quarter == 5:
+            selected.append(row)
+        if termtype == 2 and quarter in {1, 2, 3, 4}:
+            selected.append(row)
+    return _sort_vci_rows(selected, termtype)[:limit]
+
+
+def _extract_vci_period_dates(rows: list[dict], termtype: int) -> dict[str, date]:
+    period_dates: dict[str, date] = {}
+    for row in rows:
+        year = _coerce_fiscal_year(row.get("yearReport"))
+        if year is None:
+            continue
+        quarter = None if termtype == 1 else _coerce_quarter(row.get("lengthReport"))
+        try:
+            period, _, normalized_quarter = _termtype_period(year, termtype, quarter)
+        except ValueError:
+            continue
+        report_date = _vci_report_date(
+            row,
+            fallback=_period_end_date(year, normalized_quarter),
+        )
+        if report_date is not None and period not in period_dates:
+            period_dates[period] = report_date
+    return period_dates
+
+
 def _parse_financial_page(
     symbol: str, report_type: str, response: dict
 ) -> pl.DataFrame:
@@ -302,6 +475,14 @@ class _KBSClient:
         import httpx  # noqa: PLC0415
 
         self._http = httpx.Client(timeout=30, headers=_HEADERS)
+
+    # --------------------------------------------------------------- Listings
+
+    def get_etfs(self) -> list[str]:
+        """Return listed KBS ETF symbols in QTS ``VN:`` symbol format."""
+        resp = self._http.get(_KBS_ETF_LIST)
+        resp.raise_for_status()
+        return _parse_etf_symbols(resp.json())
 
     # ------------------------------------------------------------------ OHLCV
 
@@ -394,6 +575,143 @@ class _KBSClient:
         return pl.concat(frames)
 
 
+class _VCIClient:
+    """Thin httpx wrapper for the Vietcap IQ fundamentals endpoints."""
+
+    def __init__(self) -> None:
+        import httpx  # noqa: PLC0415
+
+        self._http = httpx.Client(timeout=30, headers=_HEADERS, follow_redirects=True)
+        self._handshake()
+
+    def _handshake(self) -> None:
+        self._http.get(_VCI_PRICEBOARD)
+
+    def get_statement_rows(self, symbol: str, section: str, termtype: int, limit: int) -> list[dict]:
+        resp = self._http.get(
+            f"{_VCI_FINANCIAL_STATEMENT}/{symbol}/financial-statement",
+            params={"section": section},
+        )
+        resp.raise_for_status()
+        return _select_vci_statement_rows(resp.json(), termtype, limit)
+
+    def get_ratio_rows(self, symbol: str, termtype: int, limit: int) -> list[dict]:
+        resp = self._http.get(f"{_VCI_FINANCIAL_STATEMENT}/{symbol}/statistics-financial")
+        resp.raise_for_status()
+        payload = resp.json().get("data", [])
+        rows = payload if isinstance(payload, list) else []
+        return _select_vci_ratio_rows(rows, termtype, limit)
+
+    def get_statement_metadata(self, symbol: str) -> dict[str, dict[str, str]]:
+        resp = self._http.get(f"{_VCI_FINANCIAL_STATEMENT}/{symbol}/financial-statement/metrics")
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        if not isinstance(data, dict):
+            return {}
+
+        metadata: dict[str, dict[str, str]] = {}
+        for section, rows in data.items():
+            if not isinstance(rows, list):
+                continue
+            labels: dict[str, str] = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                field = str(row.get("field", "")).strip()
+                label = str(row.get("titleEn", "")).strip()
+                if field and label:
+                    labels[field] = label
+            if labels:
+                metadata[str(section)] = labels
+        return metadata
+
+
+def _normalize_vci_statement_rows(
+    symbol: str,
+    report_type: str,
+    rows: list[dict],
+    labels: dict[str, str],
+    termtype: int,
+) -> pl.DataFrame:
+    records: list[dict] = []
+    for row in rows:
+        year = _coerce_fiscal_year(row.get("yearReport"))
+        quarter = None if termtype == 1 else _coerce_quarter(row.get("lengthReport"))
+        if year is None:
+            continue
+        try:
+            period, fiscal_year, normalized_quarter = _termtype_period(year, termtype, quarter)
+        except ValueError:
+            continue
+        report_date = _vci_report_date(
+            row,
+            fallback=_period_end_date(fiscal_year, normalized_quarter),
+        )
+        if report_date is None:
+            continue
+        for field, item_en in labels.items():
+            value = _coerce_numeric(row.get(field))
+            if value is None:
+                continue
+            records.append({
+                "symbol": symbol,
+                "report_type": report_type,
+                "period": period,
+                "fiscal_year": fiscal_year,
+                "quarter": normalized_quarter,
+                "report_date": report_date,
+                "item_en": item_en,
+                "value": value,
+            })
+    if not records:
+        return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+    return pl.DataFrame(records, schema=_FUNDAMENTALS_SCHEMA)
+
+
+def _normalize_vci_ratio_rows(
+    symbol: str,
+    rows: list[dict],
+    termtype: int,
+    period_dates: dict[str, date],
+) -> pl.DataFrame:
+    records: list[dict] = []
+    for row in rows:
+        year = _coerce_fiscal_year(row.get("yearReport"))
+        raw_quarter = _coerce_quarter(row.get("quarter"))
+        if year is None or raw_quarter is None:
+            continue
+        quarter = None if termtype == 1 else raw_quarter
+        try:
+            period, fiscal_year, normalized_quarter = _termtype_period(year, termtype, quarter)
+        except ValueError:
+            continue
+        report_date = (
+            period_dates.get(period)
+            or _vci_report_date(row, fallback=_period_end_date(fiscal_year, normalized_quarter))
+        )
+        if report_date is None:
+            continue
+        for field, raw_value in row.items():
+            if field in _VCI_RATIO_EXCLUDED_FIELDS:
+                continue
+            value = _coerce_numeric(raw_value)
+            if value is None:
+                continue
+            records.append({
+                "symbol": symbol,
+                "report_type": "CSTC",
+                "period": period,
+                "fiscal_year": fiscal_year,
+                "quarter": normalized_quarter,
+                "report_date": report_date,
+                "item_en": field,
+                "value": value,
+            })
+    if not records:
+        return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+    return pl.DataFrame(records, schema=_FUNDAMENTALS_SCHEMA)
+
+
 def _is_index(symbol: str) -> bool:
     """Return True only for known VN index codes (not equity tickers)."""
     return strip_vn_prefix(symbol) in _INDEX_SYMBOLS
@@ -417,17 +735,27 @@ class VnstockDataSource(BaseDataSource):
     def __init__(
         self,
         client: _KBSClient | None = None,
+        vci_client: _VCIClient | None = None,
         ohlcv_payloads: dict[str, pl.DataFrame] | None = None,
         fundamentals_payloads: dict[str, pl.DataFrame] | None = None,
+        fundamentals_source: str = "kbs",
     ) -> None:
+        normalized_source = fundamentals_source.lower()
+        if normalized_source not in _FUNDAMENTALS_SOURCES:
+            raise ValueError(
+                f"Unsupported VN fundamentals source '{fundamentals_source}'. "
+                f"Expected one of {sorted(_FUNDAMENTALS_SOURCES)}."
+            )
         self._client = client
+        self._vci_client = vci_client
         self.ohlcv_payloads = ohlcv_payloads or {}
         self.fundamentals_payloads = fundamentals_payloads or {}
+        self.fundamentals_source = normalized_source
 
     @classmethod
-    def from_env(cls) -> VnstockDataSource:
+    def from_env(cls, *, fundamentals_source: str = "kbs") -> VnstockDataSource:
         """Build live client. No credentials required for KBS public data."""
-        return cls(client=_KBSClient())
+        return cls(client=_KBSClient(), fundamentals_source=fundamentals_source)
 
     async def fetch(self, data_type: DataType, symbol: str, **kwargs) -> pl.DataFrame:
         if data_type is DataType.OHLCV:
@@ -497,10 +825,10 @@ class VnstockDataSource(BaseDataSource):
             Polars DataFrame with schema _FUNDAMENTALS_SCHEMA.
         """
         if self._client is None:
-            try:
+            if symbol in self.fundamentals_payloads:
                 return self.fundamentals_payloads[symbol]
-            except KeyError as exc:
-                raise DataSourceError("Unknown vnstock fundamentals symbol", symbol) from exc
+            if self.fundamentals_source != "vci":
+                raise DataSourceError("Unknown vnstock fundamentals symbol", symbol)
 
         ticker = strip_vn_prefix(symbol)
         cache_path = _fundamentals_cache_path(ticker, termtype)
@@ -513,7 +841,38 @@ class VnstockDataSource(BaseDataSource):
                 return pl.read_parquet(cache_path)
 
         try:
-            frame = self._client.get_all_financials(ticker, termtype=termtype, pages=pages)
+            if self.fundamentals_source == "kbs":
+                assert self._client is not None
+                frame = self._client.get_all_financials(ticker, termtype=termtype, pages=pages)
+            else:
+                vci_client = self._vci_client or _VCIClient()
+                self._vci_client = vci_client
+                limit = pages * 4
+                metadata = vci_client.get_statement_metadata(ticker)
+                statement_frames: list[pl.DataFrame] = []
+                period_dates: dict[str, date] = {}
+                for section, report_type in _VCI_SECTION_TO_REPORT_TYPE.items():
+                    rows = vci_client.get_statement_rows(ticker, section, termtype, limit)
+                    period_dates.update(_extract_vci_period_dates(rows, termtype))
+                    statement_frames.append(
+                        _normalize_vci_statement_rows(
+                            symbol,
+                            report_type,
+                            rows,
+                            metadata.get(section, {}),
+                            termtype,
+                        )
+                    )
+                ratio_rows = vci_client.get_ratio_rows(ticker, termtype, limit)
+                statement_frames.append(
+                    _normalize_vci_ratio_rows(symbol, ratio_rows, termtype, period_dates)
+                )
+                nonempty = [frame for frame in statement_frames if not frame.is_empty()]
+                frame = (
+                    pl.concat(nonempty, how="vertical")
+                    if nonempty
+                    else pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+                )
         except Exception as exc:
             raise DataSourceError(str(exc), symbol) from exc
 
