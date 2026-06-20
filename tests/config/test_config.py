@@ -198,6 +198,37 @@ train_window: 126
     assert config.rebalance_frequency == "monthly"
 
 
+def test_loader_resolves_universe_asset_alias(config_dir):
+    path = config_dir / "universe_asset.yaml"
+    path.write_text(
+        """
+workflow: research
+asset_types: [vn_stock]
+universe: vn100
+start_date: "2024-01-01"
+end_date: "2024-03-20"
+initial_capital: 100000
+data_sources:
+  vn_stock: dnse
+storage: duckdb
+features:
+  technical: false
+  fundamental: false
+  onchain: false
+  forward_returns:
+    periods: []
+strategy:
+  type: factor
+  params: {}
+backtest_engine: vectorbt
+"""
+    )
+    config = load_config(path)
+    assert config.universe.vn_stock[0] == "VN:ACB"
+    assert "VN:VNM" in config.universe.vn_stock
+    assert config.universe.stock == []
+
+
 def test_config_build_resolves_registry_driven_indicators(config_dir, monkeypatch, tmp_path):
     import_module("qts.data.sources.fmp")
     monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))

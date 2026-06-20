@@ -34,7 +34,7 @@ def _make_result(
     equity = pl.DataFrame(
         {
             "date": returns_data["date"],
-            "equity": [100_000.0, 101_000.0],
+            "equity": [100_000.0 + (index * 1_000.0) for index in range(len(returns_data["date"]))],
         }
     ).with_columns(pl.col("date").cast(pl.Date))
     signals = pl.DataFrame({"date": [], "symbol": [], "signal": [], "weight": []}).cast(
@@ -72,6 +72,22 @@ def test_returns_series_values() -> None:
 
     assert abs(series.iloc[0] - 0.01) < 1e-9
     assert abs(series.iloc[1] - (-0.005)) < 1e-9
+
+
+def test_returns_series_compounds_duplicate_dates() -> None:
+    result = _make_result(
+        returns_data={
+            "date": [date(2024, 1, 2), date(2024, 1, 2), date(2024, 1, 3)],
+            "portfolio_return": [0.01, -0.02, 0.03],
+        }
+    )
+
+    series = returns_series(result)
+
+    assert len(series) == 2
+    assert series.index.is_unique
+    assert series.iloc[0] == pytest.approx((1.01 * 0.98) - 1.0)
+    assert series.iloc[1] == pytest.approx(0.03)
 
 
 def test_positions_frame_empty() -> None:

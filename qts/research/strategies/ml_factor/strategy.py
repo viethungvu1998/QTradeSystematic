@@ -32,6 +32,20 @@ from .constants import (
 )
 from .models.base import BaseMLFactorModel
 
+_BASE_NON_PREDICTOR_COLUMNS = frozenset(
+    {
+        "date",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "signal",
+        "weight",
+    }
+)
+
 
 @Registry.register_strategy("ml_factor")
 class MLFactorStrategy(BaseFactorStrategy):
@@ -39,8 +53,8 @@ class MLFactorStrategy(BaseFactorStrategy):
 
     def __init__(
         self,
-        predictor_cols: list[str],
-        target_col: str,
+        predictor_cols: list[str] | None = None,
+        target_col: str | None = None,
         train_func: Callable[[pd.DataFrame, pd.DataFrame], np.ndarray] | None = None,
         portfolio_func: Callable[..., dict[str, float]] | None = None,
         rebalance_period: int = 10,
@@ -52,25 +66,28 @@ class MLFactorStrategy(BaseFactorStrategy):
         cv_test_size: int | None = None,
         cv_max_train_size: int | None = None,
     ) -> None:
+        self.rebalance_period = positive_int(rebalance_period, "rebalance_period")
+        resolved_target_col = target_col or f"forward_return_{self.rebalance_period}"
         validate_target_col(
-            target_col,
+            resolved_target_col,
             TARGET_PREFIXES,
             message="MLFactorStrategy target_col must be a future percentage-change column",
         )
-        validate_predictor_columns(
-            predictor_cols,
-            target_col,
-            forbidden_columns=FORBIDDEN_PREDICTOR_COLUMNS,
-            forbidden_prefixes=FORBIDDEN_PREDICTOR_PREFIXES,
-            message="ML factor predictors cannot include future target columns",
-        )
-        self.predictor_cols = list(predictor_cols)
-        self.target_col = target_col
+        if predictor_cols is not None:
+            validate_predictor_columns(
+                predictor_cols,
+                resolved_target_col,
+                forbidden_columns=FORBIDDEN_PREDICTOR_COLUMNS,
+                forbidden_prefixes=FORBIDDEN_PREDICTOR_PREFIXES,
+                message="ML factor predictors cannot include future target columns",
+            )
+        self.predictor_cols = list(predictor_cols or [])
+        self._infer_predictor_cols = predictor_cols is None
+        self.target_col = resolved_target_col
         self.model = model
         self.train_func = train_func
         self.portfolio_func = portfolio_func
         self.task = task
-        self.rebalance_period = positive_int(rebalance_period, "rebalance_period")
         self.min_train_rows = int(min_train_rows)
         self.cv_splits = min_int(cv_splits, "cv_splits", minimum=2)
         self.cv_gap = non_negative_int(cv_gap, "cv_gap")
@@ -88,13 +105,19 @@ class MLFactorStrategy(BaseFactorStrategy):
         portfolio_func: Callable | None = None,
     ) -> MLFactorStrategy:
         payload = dict(params)
-        predictor_cols = [str(item) for item in payload.pop("predictor_cols")]
-        target_col = str(payload.pop("target_col"))
         task = str(payload.pop("task", "classification"))
-        rebalance_period = positive_int(
-            payload.pop("rebalance_period", payload.pop("rebalance_frequency", 10)),
-            "rebalance_period",
+        rebalance_period_raw = payload.pop("rebalance_period", None)
+        if rebalance_period_raw is None:
+            rebalance_period_raw = payload.pop("rebalance_frequency", 10)
+        else:
+            payload.pop("rebalance_frequency", None)
+        rebalance_period = positive_int(rebalance_period_raw, "rebalance_period")
+        predictor_cols_raw = payload.pop("predictor_cols", None)
+        predictor_cols = (
+            None if predictor_cols_raw is None else [str(item) for item in predictor_cols_raw]
         )
+        target_col_raw = payload.pop("target_col", None)
+        target_col = None if target_col_raw is None else str(target_col_raw)
         min_train_rows = int(payload.pop("min_train_rows", 2))
         cv_splits = min_int(payload.pop("cv_splits", 5), "cv_splits", minimum=2)
         cv_gap = non_negative_int(payload.pop("cv_gap", 0), "cv_gap")
@@ -135,9 +158,11 @@ class MLFactorStrategy(BaseFactorStrategy):
                 raise ValueError(
                     f"MLFactorStrategy requires a classification trainer, got {trainer_name}"
                 )
+            if predictor_cols is None:
+                raise ValueError("MLFactorStrategy trainer config requires predictor_cols")
             trainer_params = dict(trainer["params"])
             trainer_params.setdefault("predictor_cols", predictor_cols)
-            trainer_params.setdefault("target_col", target_col)
+            trainer_params.setdefault("target_col", target_col or f"forward_return_{rebalance_period}")
             train_func = partial(Registry.get_factor_trainer(trainer_name), **trainer_params)
         else:
             model_cls = Registry.get_model("xgb_classifier")
@@ -168,6 +193,29 @@ class MLFactorStrategy(BaseFactorStrategy):
             cv_max_train_size=cv_max_train_size,
         )
 
+    def _resolve_predictor_cols(self, df: pl.DataFrame) -> list[str]:
+        if not self._infer_predictor_cols:
+            return self.predictor_cols
+
+        predictor_cols = [
+            name
+            for name, dtype in df.schema.items()
+            if dtype.is_numeric() and not self._is_forbidden_runtime_predictor(name)
+        ]
+        self.predictor_cols = predictor_cols
+        return predictor_cols
+
+    def _is_forbidden_runtime_predictor(self, name: str) -> bool:
+        return (
+            name in _BASE_NON_PREDICTOR_COLUMNS
+            or name == self.target_col
+            or name in FORBIDDEN_PREDICTOR_COLUMNS
+            or any(
+                name == prefix or name.startswith(prefix)
+                for prefix in FORBIDDEN_PREDICTOR_PREFIXES
+            )
+        )
+
     def generate_signals(self, df: pl.DataFrame) -> pl.DataFrame:
         self.last_cv_train_dates = []
         self.last_cv_test_dates = []
@@ -175,7 +223,8 @@ class MLFactorStrategy(BaseFactorStrategy):
             return self.empty_signal_frame()
         if self.target_col not in df.columns:
             return self.empty_signal_frame()
-        if any(column not in df.columns for column in self.predictor_cols):
+        predictor_cols = self._resolve_predictor_cols(df)
+        if not predictor_cols or any(column not in df.columns for column in predictor_cols):
             return self.empty_signal_frame()
 
         df_pd = df.sort(["date", "symbol"]).to_pandas()
@@ -184,9 +233,9 @@ class MLFactorStrategy(BaseFactorStrategy):
         predict_pd = df_pd[df_pd["date"] == last_date].copy()
         trainable_pd = drop_non_numeric_nulls(
             trainable_pd,
-            [*self.predictor_cols, self.target_col],
+            [*predictor_cols, self.target_col],
         )
-        predict_pd = drop_non_numeric_nulls(predict_pd, self.predictor_cols)
+        predict_pd = drop_non_numeric_nulls(predict_pd, predictor_cols)
         if len(trainable_pd) < self.min_train_rows or predict_pd.empty:
             return self.empty_signal_frame()
 
@@ -204,9 +253,9 @@ class MLFactorStrategy(BaseFactorStrategy):
             if len(train_pd) < self.min_train_rows or test_pd.empty:
                 continue
             if self.model is not None:
-                self.model.fit(train_pd[self.predictor_cols], train_pd[self.target_col])
+                self.model.fit(train_pd[predictor_cols], train_pd[self.target_col])
                 fold_scores.append(
-                    np.asarray(self.model.predict(predict_pd[self.predictor_cols]), dtype=float)
+                    np.asarray(self.model.predict(predict_pd[predictor_cols]), dtype=float)
                 )
             elif self.train_func is not None:
                 self.last_thresholds = MLFactorClassThresholds.fit(
@@ -232,7 +281,7 @@ class MLFactorStrategy(BaseFactorStrategy):
         weights_dict = self.portfolio_func(predictions, history_df=last_train_pd)
         if not weights_dict:
             return self.empty_signal_frame()
-        return self.signal_frame_from_weights(last_date, weights_dict)
+        return self.signal_frame_from_weights(pd.Timestamp(last_date).date(), weights_dict)
 
 
 __all__ = ["MLFactorStrategy"]

@@ -230,6 +230,34 @@ def test_generate_signals_missing_predictors_empty(ml_df):
     assert set(result.columns) == _SIGNAL_COLS
 
 
+def test_generate_signals_infers_predictors_from_runtime_frame(ml_df):
+    captured: dict[str, list[str]] = {}
+
+    def train_func(train: pd.DataFrame, predict: pd.DataFrame) -> np.ndarray:
+        captured["train_columns"] = train.columns.to_list()
+        captured["predict_columns"] = predict.columns.to_list()
+        return predict["f1"].to_numpy(dtype=float)
+
+    def portfolio_func(predictions: pd.Series, history_df: pd.DataFrame | None = None):
+        ranked = predictions.sort_values(ascending=False)
+        return {str(ranked.index[0]): 1.0, str(ranked.index[-1]): -1.0}
+
+    strategy = MLFactorStrategy(
+        target_col=_TARGET_COL,
+        train_func=train_func,
+        portfolio_func=portfolio_func,
+    )
+
+    result = strategy.generate_signals(ml_df)
+
+    assert strategy.predictor_cols == _PREDICTOR_COLS
+    assert strategy.target_col == _TARGET_COL
+    assert _TARGET_COL not in strategy.predictor_cols
+    assert _TARGET_COL in captured["train_columns"]
+    assert all(column in captured["predict_columns"] for column in strategy.predictor_cols)
+    assert not result.is_empty()
+
+
 def test_predictor_target_leakage_rejected():
     with pytest.raises(ValueError, match="future target"):
         MLFactorStrategy(

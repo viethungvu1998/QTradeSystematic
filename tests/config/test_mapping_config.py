@@ -7,6 +7,7 @@ import pytest
 
 from qts.config.builder import Config
 from qts.config.loader import load_config_from_mapping
+from qts.research.features.forward_returns import ForwardReturns
 from qts.research.strategies.ml_factor.strategy import MLFactorStrategy
 
 
@@ -78,6 +79,37 @@ def test_config_build_from_mapping_resolves_ml_factor_factories(monkeypatch, tmp
     assert resolved.raw.rebalance_frequency == 5
     assert callable(resolved.strategy.train_func)
     assert callable(resolved.strategy.portfolio_func)
+
+
+def test_config_build_infers_ml_factor_target_from_rebalance(monkeypatch, tmp_path):
+    monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))
+    raw = _research_mapping()
+    raw["features"] = {
+        "indicators": [
+            {"name": "rsi", "params": {"periods": [14, 21]}},
+            {"name": "roc", "params": {"periods": [14, 21]}},
+            {"name": "ma", "params": {"periods": [5, 10, 20]}},
+        ]
+    }
+    raw["rebalance_frequency"] = 12
+    raw["strategy"] = {
+        "type": "ml_factor",
+        "params": {
+            "task": "classification",
+            "model": {"name": "xgb_classifier", "params": {"n_estimators": 1}},
+        },
+    }
+
+    resolved = Config.build_from_mapping(raw)
+
+    assert isinstance(resolved.strategy, MLFactorStrategy)
+    assert resolved.strategy.predictor_cols == []
+    assert resolved.strategy.rebalance_period == 12
+    assert resolved.strategy.target_col == "forward_return_12"
+    assert any(
+        isinstance(feature, ForwardReturns) and feature.periods == [12]
+        for feature in resolved.feature_pipeline.features
+    )
 
 
 def test_config_build_supports_ml_factor_base_config(monkeypatch, tmp_path):

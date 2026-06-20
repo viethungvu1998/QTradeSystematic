@@ -39,7 +39,7 @@ research = [
   "matplotlib>=3.9.0",
   "scikit-learn>=1.8.0",
   "xgboost>=3.0.0",
-  "vectorbtpro @ file:./lib/vectorbt.pro-main",
+  "vectorbtpro",
 ]
 notebook = [
   "ipykernel>=6.29.0",
@@ -80,6 +80,9 @@ packages = ["qts"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv.sources]
+vectorbtpro = { path = "lib/vectorbt.pro-main" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -49,3 +49,23 @@ class ROCFeature(BaseFeature):
             ]
         )
         return self._validate_append_only(df, result)
+
+
+@Registry.register_feature("ma")
+class MovingAverageFeature(BaseFeature):
+    """Simple moving average of close price."""
+
+    def __init__(self, periods: list[int] | tuple[int, ...] = (20,)) -> None:
+        self.periods = list(periods)
+
+    def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
+        result = df.sort(["symbol", "date"]).with_columns(
+            [
+                pl.col("close")
+                .rolling_mean(period, min_samples=period)
+                .over("symbol")
+                .alias(f"ma_{period}")
+                for period in self.periods
+            ]
+        )
+        return self._validate_append_only(df, result)

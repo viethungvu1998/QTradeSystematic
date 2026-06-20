@@ -106,6 +106,7 @@ REQUIRED_KEYS_BY_WORKFLOW = {
         "schedule",
     },
 }
+ASSET_CONFIG_DIR = Path(__file__).resolve().parents[2] / "configs" / "assets"
 
 
 def _as_date(value: str | None) -> date | None:
@@ -150,6 +151,39 @@ def _as_positive_int(value: object, label: str) -> int:
     return result
 
 
+
+
+def _resolve_universe_payload(raw: object) -> Mapping[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, Mapping):
+        return raw
+    if not isinstance(raw, str):
+        raise ConfigError("universe must be a mapping or an asset file name")
+
+    asset_payload = _load_universe_asset(raw)
+    asset_type = asset_payload.get("asset_type")
+    symbols = asset_payload.get("symbols")
+    if not isinstance(asset_type, str) or asset_type not in UniverseConfig.__dataclass_fields__:
+        raise ConfigError(f"Universe asset '{raw}' has invalid asset_type")
+    if not isinstance(symbols, list) or any(not isinstance(symbol, str) for symbol in symbols):
+        raise ConfigError(f"Universe asset '{raw}' must define a symbols list")
+    return {asset_type: list(symbols)}
+
+
+def _load_universe_asset(name: str) -> Mapping[str, Any]:
+    candidates = [ASSET_CONFIG_DIR / name]
+    if not Path(name).suffix:
+        candidates.extend([ASSET_CONFIG_DIR / f"{name}.yml", ASSET_CONFIG_DIR / f"{name}.yaml"])
+    for path in candidates:
+        if path.exists():
+            payload = yaml.safe_load(path.read_text()) or {}
+            if not isinstance(payload, Mapping):
+                raise ConfigError(f"Expected mapping YAML: {path}")
+            return payload
+    raise ConfigError(f"Unknown universe asset: {name}")
+
+
 def load_config_from_mapping(raw: Mapping[str, Any]) -> BacktestConfig:
     """Parse and validate a mapping into a typed config."""
 
@@ -163,7 +197,7 @@ def load_config_from_mapping(raw: Mapping[str, Any]) -> BacktestConfig:
     missing = sorted(REQUIRED_KEYS_BY_WORKFLOW[workflow] - set(payload))
     if missing:
         raise ConfigError(f"Missing required key(s): {', '.join(missing)}")
-    universe = UniverseConfig(**payload.get("universe", {}))
+    universe = UniverseConfig(**_resolve_universe_payload(payload.get("universe")))
     data_sources = DataSourcesConfig(**payload.get("data_sources", {}))
     features_payload = payload.get("features", {})
     raw_transforms = payload.get("features", {}).get("transforms", [])

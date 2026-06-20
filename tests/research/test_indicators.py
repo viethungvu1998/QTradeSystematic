@@ -34,6 +34,7 @@ def _indicator_fixture() -> pl.DataFrame:
     [
         ("rsi", {"periods": [14]}, ["rsi_14"], 14),
         ("roc", {"periods": [1, 5, 21]}, ["roc_1", "roc_5", "roc_21"], 21),
+        ("ma", {"periods": [5, 10, 20]}, ["ma_5", "ma_10", "ma_20"], 20),
         ("macd", {"fast": 12, "slow": 26, "signal": 9}, ["macd_line", "macd_signal", "macd_hist"], 35),
         ("adx", {"period": 14}, ["adx_14"], 28),
         ("atr", {"periods": [14]}, ["atr_14"], 14),

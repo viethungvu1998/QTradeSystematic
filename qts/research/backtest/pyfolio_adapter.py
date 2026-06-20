@@ -14,7 +14,9 @@ def returns_series(result: BacktestResult) -> pd.Series:
 
     df = result.returns.to_pandas()
     df["date"] = pd.to_datetime(df["date"], utc=True)
-    series = df.set_index("date")["portfolio_return"]
+    series = df.set_index("date")["portfolio_return"].astype(float).sort_index()
+    if series.index.has_duplicates:
+        series = series.groupby(level=0).apply(lambda values: (1.0 + values).prod() - 1.0)
     series.name = "portfolio"
     return series
 

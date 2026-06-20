@@ -11,6 +11,7 @@ from typing import Any
 import polars as pl
 
 from qts.config.loader import load_config, load_config_from_mapping
+from qts.core.errors import ConfigError
 from qts.core.instrument import AssetType
 from qts.core.registry import Registry
 from qts.data.bundles.local import LocalBundleAdapter
@@ -148,13 +149,14 @@ def _build_strategy(
     portfolio_func: Callable | None = None,
 ) -> object:
     strategy_cls = Registry.get_strategy(raw.strategy.type)
+    strategy_params = _resolve_strategy_params(raw)
     if hasattr(strategy_cls, "from_config_params"):
         return strategy_cls.from_config_params(
-            raw.strategy.params,
+            strategy_params,
             portfolio_func=portfolio_func,
         )
     try:
-        return strategy_cls(**raw.strategy.params, portfolio_func=portfolio_func)
+        return strategy_cls(**strategy_params, portfolio_func=portfolio_func)
     except TypeError:
         import warnings
 
@@ -163,7 +165,33 @@ def _build_strategy(
             "portfolio_construction config will be ignored for this strategy.",
             stacklevel=2,
         )
-        return strategy_cls(**raw.strategy.params)
+        return strategy_cls(**strategy_params)
+
+
+def _resolve_strategy_params(raw: BacktestConfig) -> dict[str, Any]:
+    params = dict(raw.strategy.params)
+    if raw.strategy.type != "ml_factor":
+        return params
+
+    rebalance_period = _ml_factor_rebalance_period(raw, params)
+    params["rebalance_period"] = rebalance_period
+    params.pop("rebalance_frequency", None)
+    params.setdefault("target_col", f"forward_return_{rebalance_period}")
+
+    return params
+
+
+def _ml_factor_rebalance_period(raw: BacktestConfig, params: Mapping[str, Any]) -> int:
+    value = params.get("rebalance_period", params.get("rebalance_frequency", raw.rebalance_frequency))
+    if isinstance(value, bool):
+        raise ConfigError("ml_factor rebalance_period must be a positive integer")
+    try:
+        period = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("ml_factor rebalance_period must be a positive integer") from exc
+    if period < 1:
+        raise ConfigError("ml_factor rebalance_period must be a positive integer")
+    return period
 
 
 def _build_component_fields(
@@ -233,8 +261,11 @@ def _resolve_features(raw: BacktestConfig) -> list[BaseFeature]:
         features.append(Registry.get_feature("fundamental")())
     if raw.features.onchain:
         features.append(Registry.get_feature("onchain")())
-    if raw.features.forward_returns.periods:
-        features.append(Registry.get_feature("forward_returns")(periods=raw.features.forward_returns.periods))
+    forward_periods = list(raw.features.forward_returns.periods)
+    if not forward_periods and raw.strategy.type == "ml_factor":
+        forward_periods = [_ml_factor_rebalance_period(raw, raw.strategy.params)]
+    if forward_periods:
+        features.append(Registry.get_feature("forward_returns")(periods=forward_periods))
     return features
 
 
