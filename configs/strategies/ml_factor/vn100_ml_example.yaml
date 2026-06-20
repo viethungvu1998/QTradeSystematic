@@ -12,13 +12,37 @@ data_sources:
   vn_stock: vnstock
 storage: duckdb
 features:
+  transforms:
+    - name: average_price
+      params:
+        output_column: avg_price
+
+    - name: log_price
+      params:
+        price_column: avg_price
+        output_column: log_price
+
+    # - name: qsmom
+    #   params:
+    #     close_column: log_price
+    #     roc_fast_period: 21
+    #     roc_slow_period: 252
+    #     returns_period: 126
+
   indicators:
     - name: rsi
-      params: {periods: [14, 21]}
+      params: 
+        periods: [14, 21]
+        price_column: log_price
+
     - name: roc
-      params: {periods: [14, 21]}
+      params: 
+        periods: [14, 21]
+        price_column: log_price
     - name: ma
-      params: {periods: [5, 10, 20]}
+      params: 
+        periods: [5, 10, 20]
+        price_column: log_price
 
 strategy:
   type: ml_factor

@@ -135,7 +135,7 @@ All commands use the repo-local venv (`python >=3.13` required):
 | `data` | `httpx` — HTTP client for remote data sources |
 | `vn` | `vnstock` — VN equity/futures/warrant data |
 | `research` | `matplotlib`, `xgboost`, `vectorbtpro` — feature engineering and backtesting |
-| `notebook` | `ipykernel`, `IPython`, `nbclient`, `nbformat` — Jupyter support |
+| `notebook` | `ipykernel`, `IPython`, `nbclient`, `nbformat`, `plotly` — Jupyter support and interactive charts |
 | `zipline` | `zipline-reloaded` — Zipline backtest engine |
 | `execution` | `binance-connector`, `futu-api`, `python-dotenv` — live broker adapters |
 | `orchestration` | `prefect`, `prefect-redis`, `asyncpg`, `redis` — Prefect workflow engine |

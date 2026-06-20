@@ -83,6 +83,7 @@ If you want a smaller environment, install only the extras you need:
 | `data` | httpx | Any live data source (Binance, DNSE) |
 | `vn` | vnstock | VN equities (`VN:`), VN futures (`VNF:`), VN warrants (`VNW:`) |
 | `research` | matplotlib, scikit-learn, xgboost, vectorbtpro wheel | VectorBTProEngine; ML strategies |
+| `notebook` | ipykernel, IPython, nbclient, nbformat, plotly | Jupyter notebooks and interactive charts |
 | `zipline` | zipline-reloaded | ZiplineReloadedEngine |
 | `execution` | binance-connector, futu-api, python-dotenv | Live order routing |
 | `orchestration` | prefect, prefect-redis, asyncpg, redis | Prefect deployments via `serve.py` |

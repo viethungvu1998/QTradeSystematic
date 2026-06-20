@@ -50,6 +50,29 @@ def test_config_build_from_mapping_resolves_registered_components(monkeypatch, t
     assert resolved.engine is not None
 
 
+def test_config_build_from_mapping_resolves_price_transforms(monkeypatch, tmp_path):
+    monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))
+    raw = _research_mapping()
+    raw["features"] = {
+        "transforms": [
+            {"name": "average_price", "params": {"output_column": "avg_price"}},
+            {
+                "name": "log_price",
+                "params": {"price_column": "avg_price", "output_column": "log_price"},
+            },
+        ],
+        "indicators": [
+            {"name": "rsi", "params": {"periods": [14], "price_column": "log_price"}},
+        ],
+        "forward_returns": {"periods": [1]},
+    }
+
+    resolved = Config.build_from_mapping(raw)
+
+    assert len(resolved.feature_pipeline.transforms) == 2
+    assert resolved.feature_pipeline.features[0].price_column == "log_price"
+
+
 def test_config_build_from_mapping_resolves_ml_factor_factories(monkeypatch, tmp_path):
     monkeypatch.setenv("QTS_ROOT", str(tmp_path / "qts_root"))
     raw = _research_mapping()

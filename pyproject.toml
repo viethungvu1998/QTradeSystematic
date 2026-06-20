@@ -46,6 +46,7 @@ notebook = [
   "IPython>=8.0.0",
   "nbclient>=0.10.0",
   "nbformat>=5.10.0",
+  "plotly>=6.8.0",
 ]
 zipline = [
   "zipline-reloaded>=3.1.1",

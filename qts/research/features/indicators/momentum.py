@@ -8,8 +8,8 @@ from qts.core.registry import Registry
 from qts.research.features.base import BaseFeature
 
 
-def _rsi_expr(period: int) -> pl.Expr:
-    delta = pl.col("close").diff().over("symbol")
+def _rsi_expr(period: int, price_column: str) -> pl.Expr:
+    delta = pl.col(price_column).diff().over("symbol")
     gains = pl.when(delta > 0).then(delta).otherwise(0.0)
     losses = pl.when(delta < 0).then(-delta).otherwise(0.0)
     avg_gain = gains.ewm_mean(alpha=1 / period, adjust=False, min_samples=period).over("symbol")
@@ -22,12 +22,20 @@ def _rsi_expr(period: int) -> pl.Expr:
 class RSIFeature(BaseFeature):
     """Relative strength index."""
 
-    def __init__(self, periods: list[int] | tuple[int, ...] = (14,)) -> None:
+    def __init__(
+        self,
+        periods: list[int] | tuple[int, ...] = (14,),
+        price_column: str = "close",
+    ) -> None:
         self.periods = list(periods)
+        self.price_column = price_column
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         result = df.sort(["symbol", "date"]).with_columns(
-            [_rsi_expr(period).alias(f"rsi_{period}") for period in self.periods]
+            [
+                _rsi_expr(period, self.price_column).alias(f"rsi_{period}")
+                for period in self.periods
+            ]
         )
         return self._validate_append_only(df, result)
 
@@ -36,15 +44,24 @@ class RSIFeature(BaseFeature):
 class ROCFeature(BaseFeature):
     """Rate of change."""
 
-    def __init__(self, periods: list[int] | tuple[int, ...] = (1, 5, 21)) -> None:
+    def __init__(
+        self,
+        periods: list[int] | tuple[int, ...] = (1, 5, 21),
+        price_column: str = "close",
+    ) -> None:
         self.periods = list(periods)
+        self.price_column = price_column
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         result = df.sort(["symbol", "date"]).with_columns(
             [
-                ((pl.col("close") / pl.col("close").shift(period).over("symbol")) - 1).alias(
-                    f"roc_{period}"
-                )
+                (
+                    (
+                        pl.col(self.price_column)
+                        / pl.col(self.price_column).shift(period).over("symbol")
+                    )
+                    - 1
+                ).alias(f"roc_{period}")
                 for period in self.periods
             ]
         )
@@ -55,13 +72,18 @@ class ROCFeature(BaseFeature):
 class MovingAverageFeature(BaseFeature):
     """Simple moving average of close price."""
 
-    def __init__(self, periods: list[int] | tuple[int, ...] = (20,)) -> None:
+    def __init__(
+        self,
+        periods: list[int] | tuple[int, ...] = (20,),
+        price_column: str = "close",
+    ) -> None:
         self.periods = list(periods)
+        self.price_column = price_column
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         result = df.sort(["symbol", "date"]).with_columns(
             [
-                pl.col("close")
+                pl.col(self.price_column)
                 .rolling_mean(period, min_samples=period)
                 .over("symbol")
                 .alias(f"ma_{period}")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from math import isnan
+from math import isclose, isnan
 
 import polars as pl
 import pytest
@@ -70,3 +70,28 @@ def test_registered_indicator_features_append_expected_columns(
             values = partition[column].to_list()[warmup:]
             assert all(value is not None for value in values)
             assert all(not (isinstance(value, float) and isnan(value)) for value in values)
+
+
+def test_momentum_indicators_use_configured_price_column():
+    fixture = pl.DataFrame(
+        {
+            "date": [date(2024, 1, index) for index in range(1, 9)],
+            "symbol": ["AAPL"] * 8,
+            "open": [100.0] * 8,
+            "high": [101.0] * 8,
+            "low": [99.0] * 8,
+            "close": [100.0] * 8,
+            "volume": [1_000.0] * 8,
+            "log_price": [float(index) for index in range(1, 9)],
+        }
+    )
+
+    rsi = Registry.get_feature("rsi")(periods=[3], price_column="log_price")
+    roc = Registry.get_feature("roc")(periods=[2], price_column="log_price")
+    ma = Registry.get_feature("ma")(periods=[3], price_column="log_price")
+
+    result = ma.fit_transform(roc.fit_transform(rsi.fit_transform(fixture)))
+
+    assert result["rsi_3"][3] > 99.0
+    assert isclose(result["roc_2"][4], (5.0 / 3.0) - 1.0)
+    assert isclose(result["ma_3"][2], 2.0)
