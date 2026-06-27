@@ -155,9 +155,16 @@ class PortfolioConstructionConfig:
 
 
 @dataclass(slots=True)
+class TestIntervalConfig:
+    start_date: date
+    end_date: date
+
+
+@dataclass(slots=True)
 class ValidationConfig:
     method: str = "single_split"
     test_start_date: date | None = None
+    test_intervals: list[TestIntervalConfig] = field(default_factory=list)
     n_folds: int = 5
     fold_size_days: int = 252
     embargo_days: int = 0

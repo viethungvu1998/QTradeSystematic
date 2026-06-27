@@ -16,7 +16,9 @@ from qts.research.backtest.base import (
     DataSourcesConfig,
     FeaturesConfig,
     StrategyConfig,
+    TestIntervalConfig as BacktestTestIntervalConfig,
     UniverseConfig,
+    ValidationConfig,
 )
 from qts.research.backtest.engines.vectorbtpro_engine import VectorBTProEngine
 from qts.research.features.pipeline import FeaturePipeline
@@ -61,9 +63,11 @@ def _config(train_window: int = 20, rebalance_frequency: str = "monthly") -> Bac
 class RecordingPipeline:
     def __init__(self) -> None:
         self.max_dates: list[date] = []
+        self.date_sets: list[set[date]] = []
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         self.max_dates.append(df["date"].max())
+        self.date_sets.append(set(df["date"].to_list()))
         return df.with_columns(pl.lit(1.0).alias("feature_a"))
 
 
@@ -112,6 +116,47 @@ def test_walk_forward_signals_monthly_uses_prior_window_only():
             strict=True,
         )
     )
+
+
+def test_walk_forward_signals_multi_intervals_exclude_test_dates_from_training():
+    ohlcv = _ohlcv_frame(date(2021, 1, 1), 12)
+    pipeline = RecordingPipeline()
+    strategy = FlatStrategy()
+    config = _config(train_window=3, rebalance_frequency=1)
+    config.validation = ValidationConfig(
+        method="multi_interval",
+        test_intervals=[
+            BacktestTestIntervalConfig(date(2021, 1, 5), date(2021, 1, 6)),
+            BacktestTestIntervalConfig(date(2021, 1, 10), date(2021, 1, 11)),
+        ],
+    )
+
+    signals = walk_forward_signals(pipeline, strategy, ohlcv, config)
+
+    assert signals["date"].to_list() == [
+        date(2021, 1, 5),
+        date(2021, 1, 6),
+        date(2021, 1, 10),
+        date(2021, 1, 11),
+    ]
+    held_out = {
+        date(2021, 1, 5),
+        date(2021, 1, 6),
+        date(2021, 1, 10),
+        date(2021, 1, 11),
+    }
+    for train_dates, signal_date in zip(
+        pipeline.date_sets,
+        signals["date"].to_list(),
+        strict=True,
+    ):
+        assert train_dates.isdisjoint(held_out)
+        assert max(train_dates) < signal_date
+    assert pipeline.date_sets[2] == {
+        date(2021, 1, 7),
+        date(2021, 1, 8),
+        date(2021, 1, 9),
+    }
 
 
 def test_run_backtest_frame_uses_prebuilt_signals_and_forward_fills():

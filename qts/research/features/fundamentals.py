@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,128 @@ from qts.core.registry import Registry
 from qts.research.features.base import BaseFeature
 from qts.utils.paths import cache_dir
 
+TARGET_COLUMNS = [
+    "priceToSalesRatio",
+    "debtToEquityRatio",
+    "cashRatio",
+    "quickRatio",
+    "cashEndPeriod",
+    "priceToBookRatio",
+    "preTaxProfitMargin",
+    "totalEquity",
+    "netIncome",
+    "priceToEarningsRatio",
+    "currentRatio",
+    "returnOnAssets",
+    "totalLiabilities",
+    "returnOnEquity",
+    "totalAssets",
+    "grossProfitMargin",
+    "netProfitMargin",
+    "debtToAssetsRatio",
+    "totalLiabilitiesToAssets",
+]
+
+ANNUAL_AUDIT_BASE_COLUMNS = [
+    "returnOnEquity",
+    "totalAssets",
+    "shortTermAssets",
+    "revenue",
+    "netProfitMargin",
+    "financingCashFlow",
+    "totalLiabilities",
+    "priceToEarningsRatio",
+    "preTaxProfitMargin",
+    "grossProfit",
+    "netRevenue",
+    "returnOnAssets",
+    "netCashFlow",
+    "debtToEquityRatio",
+    "grossProfitMargin",
+    "cashAndCashEquivalents",
+    "operatingCashFlow",
+    "profitBeforeTax",
+    "totalEquity",
+    "shortTermLiabilities",
+    "priceToBookRatio",
+    "investingCashFlow",
+    "cashEndPeriod",
+    "cashRatio",
+    "longTermLiabilities",
+    "enterpriseValueOverEBITDA",
+    "currentRatio",
+    "netIncome",
+    "quickRatio",
+    "priceToSalesRatio",
+    "longTermAssets",
+    "report_date",
+    "debtToAssetsRatio",
+    "totalLiabilitiesToAssets",
+    "cashAndCashEquivalentsToAssets",
+]
+ANNUAL_AUDIT_YOY_COLUMNS = [
+    "revenue_yoy",
+    "netIncome_yoy",
+    "profitBeforeTax_yoy",
+    "totalAssets_yoy",
+]
+ANNUAL_AUDIT_COLUMNS = [*ANNUAL_AUDIT_BASE_COLUMNS, *ANNUAL_AUDIT_YOY_COLUMNS]
+_ANNUAL_YOY_METADATA_COLUMNS = frozenset(
+    {"symbol", "fiscal_year", "quarter", "period_end", "available_from", "report_date"}
+)
+_ANNUAL_YOY_NUMERIC_DTYPES = frozenset(
+    {
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
+        pl.Decimal,
+    }
+)
+_DERIVED_ANNUAL_COLUMNS: dict[str, tuple[str, ...]] = {
+    "debtToAssetsRatio": ("totalLiabilities", "totalAssets"),
+    "totalLiabilitiesToAssets": ("totalLiabilities", "totalAssets"),
+    "cashAndCashEquivalentsToAssets": ("cashAndCashEquivalents", "totalAssets"),
+}
+_RAW_REPORT_TYPE_BY_COLUMN = {
+    "returnOnEquity": "CSTC",
+    "totalAssets": "CDKT",
+    "shortTermAssets": "CDKT",
+    "revenue": "KQKD",
+    "netProfitMargin": "CSTC",
+    "financingCashFlow": "LCTT",
+    "totalLiabilities": "CDKT",
+    "priceToEarningsRatio": "CSTC",
+    "preTaxProfitMargin": "CSTC",
+    "grossProfit": "KQKD",
+    "netRevenue": "KQKD",
+    "returnOnAssets": "CSTC",
+    "netCashFlow": "LCTT",
+    "debtToEquityRatio": "CSTC",
+    "grossProfitMargin": "CSTC",
+    "cashAndCashEquivalents": "CDKT",
+    "operatingCashFlow": "LCTT",
+    "profitBeforeTax": "KQKD",
+    "totalEquity": "CDKT",
+    "shortTermLiabilities": "CDKT",
+    "priceToBookRatio": "CSTC",
+    "investingCashFlow": "LCTT",
+    "cashEndPeriod": "LCTT",
+    "cashRatio": "CSTC",
+    "longTermLiabilities": "CDKT",
+    "enterpriseValueOverEBITDA": "CSTC",
+    "currentRatio": "CSTC",
+    "netIncome": "KQKD",
+    "quickRatio": "CSTC",
+    "priceToSalesRatio": "CSTC",
+    "longTermAssets": "CDKT",
+}
 CANONICAL_FUNDAMENTAL_COLUMNS = [
     "reportDate",
     "trailingEPS",
@@ -280,6 +403,90 @@ KBS_FUNDAMENTAL_ITEMS = {
     },
 }
 
+VCI_FUNDAMENTAL_ITEMS = {
+    "KQKD": {
+        "revenue": [
+            "Sales",
+            "Total Operating Income",
+            "1. Insurance premium (01=01.1+01.2-01.3)",
+            "Revenue from insurance premium",
+        ],
+        "netRevenue": [
+            "Net sales",
+            "Net Interest Income",
+            "7. Total net revenue from insurance business",
+            "Net revenue of insurance premium",
+        ],
+        "grossProfit": ["Gross Profit", "Gross profit", "Net Operating Profit Before Allowance for Credit Loss"],
+        "profitBeforeTax": [
+            "Net accounting profit/(loss) before tax",
+            "Net Accounting Profit/(loss) before tax",
+            "29. Total profit before tax",
+            "Profit before tax",
+            "IX. Profit before tax",
+        ],
+        "netIncome": [
+            "Net profit/(loss) after tax",
+            "34. Profit after tax",
+            "Profit after tax",
+            "NET PROFIT/(LOSS) AFTER TAX",
+            "XI.  Net profit after tax",
+        ],
+    },
+    "CDKT": {
+        "totalAssets": ["Total Assets", "TOTAL ASSETS"],
+        "totalLiabilities": ["Liabilities", "TOTAL LIABILITIES", "LIABILITIES", "A.  LIABILITIES"],
+        "totalEquity": [
+            "Owner's Equity",
+            "Owner's equity",
+            "OWNER'S EQUITY",
+            "Shareholders' equity",
+            "Owners' equity",
+            "I. Owner's equity",
+            "B. OWNER'S EQUITY",
+        ],
+        "cashAndCashEquivalents": ["Cash and cash equivalents"],
+        "shortTermAssets": ["CURRENT ASSETS", "Current assets"],
+        "longTermAssets": ["LONG-TERM ASSETS", "B. LONG-TERM ASSETS", "Long-term assets"],
+        "shortTermLiabilities": ["Current liabilities", "Short-term liabilities", "SHORT-TERM LIABILITIES"],
+        "longTermLiabilities": [
+            "Long-term liabilities",
+            "LONG-TERM LIABILITIES",
+            "II. Long-term liabilities",
+            "Long-term borrowings and liabilities",
+            "3. Other long-term liabilities",
+        ],
+    },
+    "LCTT": {
+        "operatingCashFlow": [
+            "Net cash flows from operating activities",
+            "Net cash from operating activities",
+            "Net cash inflows/(outflows) from operating activities",
+        ],
+        "investingCashFlow": [
+            "Net cash flows from investing activities",
+            "Net cash from investing activities",
+            "Net cash inflows/(outflows) from investing activities",
+        ],
+        "financingCashFlow": [
+            "Net cash flows from financing activities",
+            "Net cash from financing activities",
+            "Net cash inflows/(outflows) from financing activities",
+        ],
+        "netCashFlow": [
+            "Net increase in cash and cash equivalents",
+            "Net cash flows during the period",
+            "Net Increase/(Decrease) in cash and cash equivalents",
+            "IV. Net cash flows during the period",
+        ],
+        "cashEndPeriod": [
+            "Cash and cash equivalents at the end of period",
+            "Cash and cash equivalents at end of the period",
+            "Cash and cash equivalents at end of period",
+        ],
+    },
+}
+
 GROWTH_SOURCE_COLUMNS = {
     "revenue": "growthRevenue",
     "netRevenue": "growthNetRevenue",
@@ -293,6 +500,21 @@ GROWTH_SOURCE_COLUMNS = {
     "bookValuePerShare": "growthBookValuePerShare",
 }
 
+_VCI_ALIAS_PRIORITY: dict[tuple[str, str], int] = {
+    ("CDKT", "Total Assets"): 20,
+    ("CDKT", "Liabilities"): 20,
+    ("CDKT", "Owner's Equity"): 20,
+    ("CDKT", "Owner's equity"): 20,
+    ("CDKT", "Current assets"): 20,
+    ("CDKT", "CURRENT ASSETS"): 20,
+    ("CDKT", "Long-term assets"): 20,
+    ("CDKT", "LONG-TERM ASSETS"): 20,
+    ("CDKT", "TOTAL ASSETS"): 10,
+    ("CDKT", "TOTAL LIABILITIES"): 10,
+    ("CDKT", "OWNER'S EQUITY"): 10,
+    ("CSTC", "evToEbitda"): 20,
+}
+
 
 def _fund_cache_path(ticker: str, termtype: int) -> Path:
     label = "annual" if termtype == 1 else "quarterly"
@@ -301,10 +523,38 @@ def _fund_cache_path(ticker: str, termtype: int) -> Path:
 
 def _canonical_item_map() -> pl.DataFrame:
     rows = []
-    for report_type, feature_map in KBS_FUNDAMENTAL_ITEMS.items():
+    for report_type, feature_map in VCI_FUNDAMENTAL_ITEMS.items():
         for column, item_names in feature_map.items():
             for item_name in item_names:
-                rows.append({"report_type": report_type, "item_en": item_name, "column": column})
+                rows.append(
+                    {
+                        "report_type": report_type,
+                        "item_en": item_name,
+                        "column": column,
+                        "priority": _VCI_ALIAS_PRIORITY.get((report_type, item_name), 0),
+                    }
+                )
+    for source, target in FMP_ALIASES.items():
+        rows.extend(
+            [
+                {"report_type": "CSTC", "item_en": source, "column": target, "priority": 0},
+                {"report_type": "CSTC", "item_en": source.lower(), "column": target, "priority": 0},
+                {"report_type": "CSTC", "item_en": target, "column": target, "priority": 0},
+            ]
+        )
+    rows.extend(
+        [
+            {"report_type": "CSTC", "item_en": "debtToEquity", "column": "debtToEquityRatio", "priority": 0},
+            {"report_type": "CSTC", "item_en": "debtPerEquity", "column": "debtToEquityRatio", "priority": 0},
+            {"report_type": "CSTC", "item_en": "evToEbitda", "column": "enterpriseValueOverEBITDA", "priority": 20},
+            {"report_type": "CSTC", "item_en": "grossMargin", "column": "grossProfitMargin", "priority": 0},
+            {"report_type": "CSTC", "item_en": "preTaxProfitMargin", "column": "preTaxProfitMargin", "priority": 0},
+            {"report_type": "CSTC", "item_en": "afterTaxProfitMargin", "column": "netProfitMargin", "priority": 0},
+            {"report_type": "CSTC", "item_en": "currentRatio", "column": "currentRatio", "priority": 0},
+            {"report_type": "CSTC", "item_en": "quickRatio", "column": "quickRatio", "priority": 0},
+            {"report_type": "CSTC", "item_en": "cashRatio", "column": "cashRatio", "priority": 0},
+        ]
+    )
     return pl.DataFrame(rows)
 
 
@@ -327,6 +577,510 @@ def normalize_fmp_fundamentals(fundamentals: pl.DataFrame) -> pl.DataFrame:
     return renamed
 
 
+def compute_fundamental_available_date(
+    period_end: pl.Expr,
+    *,
+    reporting_lag_months: int = 5,
+) -> pl.Expr:
+    """Return the month-start date when a filing is assumed tradable."""
+
+    lagged = period_end.dt.offset_by(f"{reporting_lag_months}mo")
+    return pl.date(lagged.dt.year(), lagged.dt.month(), pl.lit(1, dtype=pl.Int8))
+
+
+def add_derived_fundamental_metrics(frame: pl.DataFrame) -> pl.DataFrame:
+    """Append derived balance-sheet ratios used by annual/quarterly pipelines."""
+
+    result = frame
+    denominator = pl.col("totalAssets").cast(pl.Float64, strict=False)
+    safe_denominator = pl.when(denominator.abs() > 1e-12).then(denominator).otherwise(None)
+    if {"totalLiabilities", "totalAssets"}.issubset(result.columns):
+        derived_debt_to_assets = (
+            (pl.col("totalLiabilities").cast(pl.Float64, strict=False) / safe_denominator) * 100.0
+        )
+        derived_liabilities_to_assets = (
+            pl.col("totalLiabilities").cast(pl.Float64, strict=False) / safe_denominator
+        )
+        if "debtToAssetsRatio" in result.columns:
+            result = result.with_columns(
+                pl.coalesce(pl.col("debtToAssetsRatio"), derived_debt_to_assets).alias(
+                    "debtToAssetsRatio"
+                )
+            )
+        else:
+            result = result.with_columns(derived_debt_to_assets.alias("debtToAssetsRatio"))
+        if "totalLiabilitiesToAssets" in result.columns:
+            result = result.with_columns(
+                pl.coalesce(pl.col("totalLiabilitiesToAssets"), derived_liabilities_to_assets).alias(
+                    "totalLiabilitiesToAssets"
+                )
+            )
+        else:
+            result = result.with_columns(
+                derived_liabilities_to_assets.alias("totalLiabilitiesToAssets")
+            )
+    if {"cashAndCashEquivalents", "totalAssets"}.issubset(result.columns):
+        derived_cash_to_assets = (
+            pl.col("cashAndCashEquivalents").cast(pl.Float64, strict=False) / safe_denominator
+        )
+        if "cashAndCashEquivalentsToAssets" in result.columns:
+            result = result.with_columns(
+                pl.coalesce(
+                    pl.col("cashAndCashEquivalentsToAssets"),
+                    derived_cash_to_assets,
+                ).alias("cashAndCashEquivalentsToAssets")
+            )
+        else:
+            result = result.with_columns(
+                derived_cash_to_assets.alias("cashAndCashEquivalentsToAssets")
+            )
+    return result
+
+
+def add_yoy_growth_columns(
+    frame: pl.DataFrame,
+    *,
+    metrics: list[str],
+    entity_column: str = "symbol",
+    sort_column: str = "available_from",
+    lag: int = 1,
+    suffix: str = "_yoy",
+) -> pl.DataFrame:
+    """Append growth columns as ``<metric>{suffix}`` using the provided lag."""
+
+    available_metrics = [metric for metric in metrics if metric in frame.columns]
+    if not available_metrics:
+        return frame
+    sorted_frame = frame.sort([entity_column, sort_column])
+    expressions: list[pl.Expr] = []
+    for metric in available_metrics:
+        current = pl.col(metric).cast(pl.Float64, strict=False)
+        previous = current.shift(lag).over(entity_column)
+        expressions.append(
+            pl.when(previous.abs() > 1e-12)
+            .then((current - previous) / previous.abs())
+            .otherwise(None)
+            .alias(f"{metric}{suffix}")
+        )
+    return sorted_frame.with_columns(expressions)
+
+
+def _is_numeric_dtype(dtype: pl.DataType) -> bool:
+    return dtype in _ANNUAL_YOY_NUMERIC_DTYPES
+
+
+def _default_annual_yoy_metrics(frame: pl.DataFrame) -> list[str]:
+    metrics: list[str] = []
+    for column, dtype in frame.schema.items():
+        if column in _ANNUAL_YOY_METADATA_COLUMNS or column.endswith("_yoy"):
+            continue
+        if _is_numeric_dtype(dtype):
+            metrics.append(column)
+    return metrics
+
+
+def _normalize_alias_phrase(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def _configured_aliases_by_column() -> dict[str, set[str]]:
+    aliases: dict[str, set[str]] = {}
+    for report_type, feature_map in VCI_FUNDAMENTAL_ITEMS.items():
+        for column, item_names in feature_map.items():
+            aliases.setdefault(column, set()).update(item_names)
+    for source, target in FMP_ALIASES.items():
+        aliases.setdefault(target, set()).update({source, source.lower(), target})
+    aliases.setdefault("debtToEquityRatio", set()).update({"debtToEquity", "debtPerEquity"})
+    aliases.setdefault("enterpriseValueOverEBITDA", set()).add("evToEbitda")
+    aliases.setdefault("grossProfitMargin", set()).add("grossMargin")
+    aliases.setdefault("preTaxProfitMargin", set()).add("preTaxProfitMargin")
+    aliases.setdefault("netProfitMargin", set()).add("afterTaxProfitMargin")
+    aliases.setdefault("currentRatio", set()).add("currentRatio")
+    aliases.setdefault("quickRatio", set()).add("quickRatio")
+    aliases.setdefault("cashRatio", set()).add("cashRatio")
+    return aliases
+
+
+_CONFIGURED_ALIASES_BY_COLUMN = _configured_aliases_by_column()
+
+
+def _audit_raw_candidates_by_column() -> dict[str, set[str]]:
+    candidates: dict[str, set[str]] = {}
+    for item_map in (KBS_FUNDAMENTAL_ITEMS, VCI_FUNDAMENTAL_ITEMS):
+        for _, feature_map in item_map.items():
+            for column, item_names in feature_map.items():
+                candidates.setdefault(column, set()).update(item_names)
+    for source, target in FMP_ALIASES.items():
+        candidates.setdefault(target, set()).update({source, source.lower(), target})
+    candidates.setdefault("debtToEquityRatio", set()).update({"debtToEquity", "debtPerEquity"})
+    candidates.setdefault("enterpriseValueOverEBITDA", set()).add("evToEbitda")
+    candidates.setdefault("grossProfitMargin", set()).add("grossMargin")
+    candidates.setdefault("preTaxProfitMargin", set()).add("preTaxProfitMargin")
+    candidates.setdefault("netProfitMargin", set()).add("afterTaxProfitMargin")
+    candidates.setdefault("currentRatio", set()).add("currentRatio")
+    candidates.setdefault("quickRatio", set()).add("quickRatio")
+    candidates.setdefault("cashRatio", set()).add("cashRatio")
+    return candidates
+
+
+_AUDIT_RAW_CANDIDATES_BY_COLUMN = _audit_raw_candidates_by_column()
+
+
+def _looks_like_unmapped_alias(column: str, raw_items: list[str]) -> bool:
+    expected_aliases = _CONFIGURED_ALIASES_BY_COLUMN.get(column, set())
+    if not expected_aliases:
+        return False
+    for item in raw_items:
+        item_phrase = _normalize_alias_phrase(item)
+        for alias in expected_aliases:
+            alias_phrase = _normalize_alias_phrase(alias)
+            if len(alias_phrase) >= 8 and alias_phrase in item_phrase and alias_phrase != item_phrase:
+                return True
+    return False
+
+
+def _has_exact_audit_candidate(column: str, raw_items: list[str]) -> bool:
+    return any(item in _AUDIT_RAW_CANDIDATES_BY_COLUMN.get(column, set()) for item in raw_items)
+
+
+def _validate_vn_fundamental_mode(mode: int) -> None:
+    if mode not in {1, 2}:
+        raise ValueError(f"Unsupported mode={mode}. Use 1 for annual or 2 for quarterly.")
+
+
+def _period_end_expr(mode: int) -> pl.Expr:
+    fiscal_year = pl.col("fiscal_year")
+    if mode == 1:
+        return pl.date(fiscal_year, pl.lit(12, dtype=pl.Int8), pl.lit(31, dtype=pl.Int8))
+    quarter = pl.col("quarter").cast(pl.Int8, strict=False)
+    return (
+        pl.when(quarter == 1)
+        .then(pl.date(fiscal_year, pl.lit(3, dtype=pl.Int8), pl.lit(31, dtype=pl.Int8)))
+        .when(quarter == 2)
+        .then(pl.date(fiscal_year, pl.lit(6, dtype=pl.Int8), pl.lit(30, dtype=pl.Int8)))
+        .when(quarter == 3)
+        .then(pl.date(fiscal_year, pl.lit(9, dtype=pl.Int8), pl.lit(30, dtype=pl.Int8)))
+        .when(quarter == 4)
+        .then(pl.date(fiscal_year, pl.lit(12, dtype=pl.Int8), pl.lit(31, dtype=pl.Int8)))
+        .otherwise(None)
+    )
+
+
+def prepare_vn_fundamental_features(
+    raw: pl.DataFrame,
+    *,
+    mode: int = 1,
+    reporting_lag_months: int = 5,
+    yoy_metrics: list[str] | None = None,
+) -> pl.DataFrame:
+    """Convert raw VN fundamentals into a canonical wide feature table.
+
+    Flow:
+    1. Keep rows for the requested frequency.
+    2. Map ``(report_type, item_en)`` into canonical metric columns.
+    3. Deduplicate per symbol / period / metric using the latest ``report_date``.
+    4. Pivot into one wide row per reporting period.
+    5. Append derived ratios and selected ``*_yoy`` columns.
+    """
+
+    if raw.is_empty():
+        return raw
+    _validate_vn_fundamental_mode(mode)
+
+    frame = raw
+    if "frequency" in frame.columns:
+        frame = frame.filter(pl.col("frequency") == ("annual" if mode == 1 else "quarterly"))
+    if "quarter" in frame.columns and mode == 1:
+        frame = frame.filter(pl.col("quarter").is_null())
+    if "quarter" in frame.columns and mode == 2:
+        frame = frame.filter(pl.col("quarter").is_not_null())
+    if frame.is_empty():
+        return pl.DataFrame()
+
+    cast_columns = [
+        pl.col("symbol").cast(pl.Utf8),
+        pl.col("fiscal_year").cast(pl.Int32, strict=False),
+        pl.col("report_date").cast(pl.Date, strict=False),
+    ]
+    if "quarter" in frame.columns:
+        cast_columns.append(pl.col("quarter").cast(pl.Int8, strict=False))
+    frame = frame.with_columns(cast_columns)
+    mapped = frame.join(_canonical_item_map(), on=["report_type", "item_en"], how="inner")
+    if mapped.is_empty():
+        return pl.DataFrame()
+
+    period_end = _period_end_expr(mode)
+    normalized = mapped.with_columns(
+        [
+            period_end.alias("period_end"),
+            compute_fundamental_available_date(
+                period_end,
+                reporting_lag_months=reporting_lag_months,
+            ).alias("available_from"),
+        ]
+    )
+    period_keys = ["symbol", "fiscal_year", "period_end", "available_from"]
+    group_keys = [*period_keys, "column"]
+    sort_keys = ["symbol", "fiscal_year", "report_date", "column"]
+    pivot_index = [*period_keys]
+    if mode == 2:
+        period_keys.insert(2, "quarter")
+        group_keys.insert(2, "quarter")
+        sort_keys.insert(2, "quarter")
+        pivot_index.insert(2, "quarter")
+    period_report_dates = normalized.group_by(period_keys).agg(
+        pl.col("report_date").max().alias("report_date")
+    )
+    preferred_priority_by_column = normalized.group_by(group_keys).agg(
+        pl.col("priority").max().alias("preferred_priority")
+    )
+    preferred_rows = (
+        normalized.join(preferred_priority_by_column, on=group_keys, how="inner")
+        .filter(pl.col("priority") == pl.col("preferred_priority"))
+    )
+    latest_report_dates_by_column = preferred_rows.group_by(group_keys).agg(
+        pl.col("report_date").max().alias("latest_report_date")
+    )
+    latest_rows = (
+        preferred_rows.join(latest_report_dates_by_column, on=group_keys, how="inner")
+        .filter(pl.col("report_date") == pl.col("latest_report_date"))
+    )
+    deduped = latest_rows.group_by(group_keys).agg(
+        pl.col("value")
+        .drop_nulls()
+        .sort_by(pl.col("value").abs())
+        .last()
+        .alias("value")
+    )
+    wide = (
+        deduped.pivot(
+            values="value",
+            index=pivot_index,
+            on="column",
+            aggregate_function="first",
+        )
+        .sort(["symbol", "available_from"])
+    )
+    wide = wide.join(period_report_dates, on=period_keys, how="left")
+    with_derived = add_derived_fundamental_metrics(wide)
+    resolved_yoy_metrics = yoy_metrics
+    if mode == 1 and resolved_yoy_metrics is None:
+        resolved_yoy_metrics = _default_annual_yoy_metrics(with_derived)
+    return add_yoy_growth_columns(
+        with_derived,
+        metrics=resolved_yoy_metrics or ["revenue", "netIncome", "profitBeforeTax", "totalAssets"],
+        lag=1 if mode == 1 else 4,
+        suffix="_yoy" if mode == 1 else "_q_yoy",
+    )
+
+
+def prepare_vn_annual_fundamental_features(
+    raw: pl.DataFrame,
+    *,
+    reporting_lag_months: int = 5,
+    yoy_metrics: list[str] | None = None,
+) -> pl.DataFrame:
+    """Backward-compatible annual wrapper around ``prepare_vn_fundamental_features``.
+
+    Annual processing always appends ``*_yoy`` for every numeric processed column,
+    excluding metadata such as ``report_date``.
+    """
+
+    return prepare_vn_fundamental_features(
+        raw,
+        mode=1,
+        reporting_lag_months=reporting_lag_months,
+        yoy_metrics=None,
+    )
+
+
+def prepare_vn_quarterly_fundamental_features(
+    raw: pl.DataFrame,
+    *,
+    reporting_lag_months: int = 5,
+    qoq_metrics: list[str] | None = None,
+) -> pl.DataFrame:
+    """Quarterly wrapper around ``prepare_vn_fundamental_features``.
+
+    Notes:
+    - ``qoq_metrics`` names the set of quarterly metrics to transform.
+    - The percentage change is computed against the same fiscal quarter in the
+      previous financial year, so the output columns remain ``*_q_yoy``.
+    """
+
+    return prepare_vn_fundamental_features(
+        raw,
+        mode=2,
+        reporting_lag_months=reporting_lag_months,
+        yoy_metrics=qoq_metrics,
+    )
+
+
+def audit_annual_fundamental_availability(
+    raw: pl.DataFrame,
+    processed: pl.DataFrame | None = None,
+    *,
+    columns: list[str] | None = None,
+) -> pl.DataFrame:
+    """Return row-level availability and root-cause audit for annual fundamentals."""
+
+    annual_raw = raw
+    if "frequency" in annual_raw.columns:
+        annual_raw = annual_raw.filter(pl.col("frequency") == "annual")
+    if "quarter" in annual_raw.columns:
+        annual_raw = annual_raw.filter(pl.col("quarter").is_null())
+    annual_processed = processed if processed is not None else prepare_vn_annual_fundamental_features(raw)
+    requested_columns = columns or ANNUAL_AUDIT_COLUMNS
+
+    raw_rows = annual_raw.to_dicts()
+    processed_rows = annual_processed.to_dicts()
+    keys = {
+        (str(row["symbol"]), int(row["fiscal_year"]))
+        for row in raw_rows
+        if row.get("symbol") is not None and row.get("fiscal_year") is not None
+    }
+    keys.update(
+        {
+            (str(row["symbol"]), int(row["fiscal_year"]))
+            for row in processed_rows
+            if row.get("symbol") is not None and row.get("fiscal_year") is not None
+        }
+    )
+    raw_by_key: dict[tuple[str, int], list[dict[str, object]]] = {}
+    for row in raw_rows:
+        if row.get("symbol") is None or row.get("fiscal_year") is None:
+            continue
+        raw_by_key.setdefault((str(row["symbol"]), int(row["fiscal_year"])), []).append(row)
+    processed_by_key = {
+        (str(row["symbol"]), int(row["fiscal_year"])): row
+        for row in processed_rows
+        if row.get("symbol") is not None and row.get("fiscal_year") is not None
+    }
+    mapped_raw = annual_raw.join(_canonical_item_map(), on=["report_type", "item_en"], how="left").to_dicts()
+    mapped_by_key: dict[tuple[str, int], list[dict[str, object]]] = {}
+    for row in mapped_raw:
+        if row.get("symbol") is None or row.get("fiscal_year") is None:
+            continue
+        mapped_by_key.setdefault((str(row["symbol"]), int(row["fiscal_year"])), []).append(row)
+
+    records: list[dict[str, object]] = []
+    sorted_keys = sorted(keys)
+    for symbol, fiscal_year in sorted_keys:
+        current_processed = processed_by_key.get((symbol, fiscal_year), {})
+        previous_processed = processed_by_key.get((symbol, fiscal_year - 1), {})
+        current_raw_rows = raw_by_key.get((symbol, fiscal_year), [])
+        current_mapped_rows = mapped_by_key.get((symbol, fiscal_year), [])
+
+        for column in requested_columns:
+            value = current_processed.get(column)
+            has_value = value is not None
+            root_cause = "available"
+
+            if column.endswith("_yoy"):
+                base_column = column[: -len("_yoy")]
+                current_base = current_processed.get(base_column)
+                previous_base = previous_processed.get(base_column)
+                if has_value:
+                    root_cause = "available"
+                elif not previous_processed:
+                    root_cause = "YoY missing because prior year is unavailable"
+                elif current_base is None or previous_base is None or abs(float(previous_base)) <= 1e-12:
+                    root_cause = "YoY missing because current or prior value is null/zero"
+                else:
+                    root_cause = "duplicate alias conflict resolved incorrectly"
+            elif column == "report_date":
+                if has_value:
+                    root_cause = "available"
+                elif current_raw_rows:
+                    root_cause = "duplicate alias conflict resolved incorrectly"
+                else:
+                    root_cause = "source missing in raw annual data"
+            elif column in _DERIVED_ANNUAL_COLUMNS:
+                if has_value:
+                    root_cause = "available"
+                else:
+                    prerequisites = _DERIVED_ANNUAL_COLUMNS[column]
+                    if any(current_processed.get(prerequisite) is None for prerequisite in prerequisites):
+                        root_cause = "derived metric missing because prerequisite columns are missing"
+                    else:
+                        root_cause = "duplicate alias conflict resolved incorrectly"
+            else:
+                expected_report_type = _RAW_REPORT_TYPE_BY_COLUMN.get(column)
+                mapped_candidates = [
+                    row
+                    for row in current_mapped_rows
+                    if row.get("column") == column
+                ]
+                report_type_rows = (
+                    [row for row in current_raw_rows if row.get("report_type") == expected_report_type]
+                    if expected_report_type is not None
+                    else current_raw_rows
+                )
+                if has_value:
+                    root_cause = "available"
+                elif mapped_candidates:
+                    root_cause = "duplicate alias conflict resolved incorrectly"
+                elif _has_exact_audit_candidate(
+                    column,
+                    [str(row.get("item_en")) for row in report_type_rows if row.get("item_en") is not None],
+                ):
+                    root_cause = "raw item exists but is excluded by VCI-only policy"
+                elif report_type_rows and _looks_like_unmapped_alias(
+                    column,
+                    [str(row.get("item_en")) for row in report_type_rows if row.get("item_en") is not None],
+                ):
+                    root_cause = "raw item exists but alias is unmapped"
+                else:
+                    root_cause = "source missing in raw annual data"
+
+            records.append(
+                {
+                    "symbol": symbol,
+                    "fiscal_year": fiscal_year,
+                    "column": column,
+                    "value_available": has_value,
+                    "root_cause": root_cause,
+                }
+            )
+    return pl.DataFrame(records)
+
+
+def summarize_annual_fundamental_availability(audit: pl.DataFrame) -> pl.DataFrame:
+    """Summarize annual availability audit by column."""
+
+    if audit.is_empty():
+        return pl.DataFrame(
+            schema={
+                "column": pl.Utf8,
+                "rows": pl.UInt32,
+                "available_rows": pl.UInt32,
+                "null_rows": pl.UInt32,
+                "coverage_pct": pl.Float64,
+                "root_causes": pl.List(pl.Utf8),
+                "sample_null_symbols": pl.List(pl.Utf8),
+            }
+        )
+    return (
+        audit.group_by("column")
+        .agg(
+            [
+                pl.len().alias("rows"),
+                pl.col("value_available").sum().alias("available_rows"),
+                (pl.len() - pl.col("value_available").sum()).alias("null_rows"),
+                ((pl.col("value_available").sum() * 100.0) / pl.len()).alias("coverage_pct"),
+                pl.col("root_cause").filter(pl.col("root_cause") != "available").unique().sort().alias("root_causes"),
+                pl.col("symbol")
+                .filter(~pl.col("value_available"))
+                .unique()
+                .sort()
+                .head(5)
+                .alias("sample_null_symbols"),
+            ]
+        )
+        .sort("column")
+    )
+
+
 def load_vn_fundamental_cache(symbols: list[str], termtype: int = 1) -> pl.DataFrame:
     """Load cached KBS/VN fundamentals for QTS VN symbols."""
 
@@ -344,17 +1098,30 @@ def load_vn_fundamental_cache(symbols: list[str], termtype: int = 1) -> pl.DataF
 
 
 def vn_fundamentals_to_fmp_like(raw: pl.DataFrame) -> pl.DataFrame:
-    """Convert tidy KBS statement rows into FMP-like canonical wide rows."""
+    """Convert tidy VN statement rows into FMP-like canonical wide rows."""
 
     if raw.is_empty():
         return raw
     selected = raw.join(_canonical_item_map(), on=["report_type", "item_en"], how="inner")
     if selected.is_empty():
         return pl.DataFrame()
+    preferred_priority = selected.group_by(["symbol", "report_date", "column"]).agg(
+        pl.col("priority").max().alias("preferred_priority")
+    )
+    preferred_selected = (
+        selected.join(preferred_priority, on=["symbol", "report_date", "column"], how="inner")
+        .filter(pl.col("priority") == pl.col("preferred_priority"))
+    )
 
     wide = (
-        selected.group_by(["symbol", "report_date", "column"])
-        .agg(pl.col("value").drop_nulls().first().alias("value"))
+        preferred_selected.group_by(["symbol", "report_date", "column"])
+        .agg(
+            pl.col("value")
+            .drop_nulls()
+            .sort_by(pl.col("value").abs())
+            .last()
+            .alias("value")
+        )
         .pivot(
             values="value",
             index=["symbol", "report_date"],

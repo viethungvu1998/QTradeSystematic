@@ -1,0 +1,28 @@
+FEATURE_BUILD fwd=24
+FEATURE_BUILD fwd=27
+FEATURE_BUILD fwd=30
+FEATURE_BUILD fwd=33
+FEATURE_BUILD fwd=36
+TRIAL 1/260 sweep_0001_baseline_fwd30_rb15_tw504_top4_n5_d3 features=baseline
+BEST sharpe=0.8066 mdd=0.2615 run=sweep_0001_baseline_fwd30_rb15_tw504_top4_n5_d3
+TRIAL 2/260 sweep_0002_baseline_fwd30_rb15_tw504_top5_n5_d3 features=baseline
+BEST sharpe=1.1127 mdd=0.1887 run=sweep_0002_baseline_fwd30_rb15_tw504_top5_n5_d3
+TRIAL 3/260 sweep_0003_baseline_fwd30_rb15_tw504_top6_n5_d3 features=baseline
+TRIAL 4/260 sweep_0004_baseline_fwd30_rb15_tw504_top7_n5_d3 features=baseline
+TRIAL 5/260 sweep_0005_baseline_fwd30_rb15_tw630_top4_n5_d3 features=baseline
+TRIAL 6/260 sweep_0006_baseline_fwd30_rb15_tw630_top5_n5_d3 features=baseline
+TRIAL 7/260 sweep_0007_baseline_fwd30_rb15_tw630_top6_n5_d3 features=baseline
+TRIAL 8/260 sweep_0008_baseline_fwd30_rb15_tw630_top7_n5_d3 features=baseline
+BEST sharpe=1.1295 mdd=0.1902 run=sweep_0008_baseline_fwd30_rb15_tw630_top7_n5_d3
+TRIAL 9/260 sweep_0009_baseline_fwd30_rb12_tw504_top4_n5_d3 features=baseline
+TRIAL 10/260 sweep_0010_baseline_fwd30_rb12_tw504_top5_n5_d3 features=baseline
+TRIAL 11/260 sweep_0011_baseline_fwd30_rb12_tw504_top6_n5_d3 features=baseline
+TRIAL 12/260 sweep_0012_baseline_fwd30_rb12_tw504_top7_n5_d3 features=baseline
+TRIAL 13/260 sweep_0013_baseline_fwd30_rb12_tw630_top4_n5_d3 features=baseline
+BEST sharpe=1.3082 mdd=0.1742 run=sweep_0013_baseline_fwd30_rb12_tw630_top4_n5_d3
+TARGET_HIT sharpe=1.3082 mdd=0.1742 run=sweep_0013_baseline_fwd30_rb12_tw630_top4_n5_d3
+<IPython.core.display.HTML object>
+<IPython.core.display.HTML object>
+<IPython.core.display.HTML object>
+LEDGER /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/alpha_sweep_results.tsv
+RANKING /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/alpha_sweep_ranking.md

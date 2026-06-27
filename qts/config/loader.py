@@ -24,10 +24,12 @@ from qts.research.backtest.base import (
     PromotionGateConfig,
     ScheduleConfig,
     StrategyConfig,
+    TestIntervalConfig,
     TransformStepConfig,
     UniverseConfig,
     ValidationConfig,
 )
+from qts.utils.date_intervals import normalize_date_intervals
 
 ALLOWED_TOP_LEVEL_KEYS = {
     "workflow",
@@ -151,6 +153,29 @@ def _as_positive_int(value: object, label: str) -> int:
     return result
 
 
+def _parse_test_intervals(raw: object) -> list[TestIntervalConfig]:
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ConfigError("validation.test_intervals must be a list")
+
+    intervals: list[TestIntervalConfig] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise ConfigError(f"validation.test_intervals[{index}] must be a mapping")
+        start = _parse_date(item.get("start_date"))
+        end = _parse_date(item.get("end_date"))
+        if start is None or end is None:
+            raise ConfigError(
+                f"validation.test_intervals[{index}] requires start_date and end_date"
+            )
+        intervals.append(TestIntervalConfig(start_date=start, end_date=end))
+
+    try:
+        normalize_date_intervals(intervals)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    return intervals
 
 
 def _resolve_universe_payload(raw: object) -> Mapping[str, Any]:
@@ -234,9 +259,11 @@ def load_config_from_mapping(raw: Mapping[str, Any]) -> BacktestConfig:
     val_raw = payload.get("validation")
     validation: ValidationConfig | None = None
     if val_raw:
+        test_intervals = _parse_test_intervals(val_raw.get("test_intervals"))
         validation = ValidationConfig(
             method=str(val_raw.get("method", "single_split")),
             test_start_date=_parse_date(val_raw.get("test_start_date")),
+            test_intervals=test_intervals,
             n_folds=int(val_raw.get("n_folds", 5)),
             fold_size_days=int(val_raw.get("fold_size_days", 252)),
             embargo_days=int(val_raw.get("embargo_days", 0)),

@@ -1,0 +1,40 @@
+Imports OK | repo_root=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic
+Using config: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/vn100_ml_example.yaml
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 525, in <module>
+    predictions = walk_forward_rank(
+        frame=dataset_pd,
+    ...<6 lines>...
+        prediction_start_date=test_start,
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 287, in walk_forward_rank
+    if not predictor.fit(train_slice, predictor_cols, target_col):
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 126, in fit
+    self.model.fit(train[predictor_cols], train[target_col], qid=qid)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 751, in inner_f
+    return func(**kwargs)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/sklearn.py", line 2308, in fit
+    self._Booster = train(
+                    ~~~~~^
+        params,
+        ^^^^^^^
+    ...<8 lines>...
+        callbacks=self.callbacks,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 751, in inner_f
+    return func(**kwargs)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/training.py", line 200, in train
+    bst.update(dtrain, iteration=i, fobj=obj)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 2391, in update
+    _LIB.XGBoosterUpdateOneIter(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.handle, ctypes.c_int(iteration), dtrain.handle
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+KeyboardInterrupt

@@ -1,0 +1,130 @@
+Runtime log     : /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/stock_ml_e2e_20260623_193824.log
+Imports OK | repo_root=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic
+Using config: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/vn100_ml_example.yaml
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 250, in handle_request
+    resp = self._pool.handle_request(req)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py", line 256, in handle_request
+    raise exc from None
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py", line 236, in handle_request
+    response = connection.handle_request(
+        pool_request.request
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_sync/connection.py", line 101, in handle_request
+    raise exc
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_sync/connection.py", line 78, in handle_request
+    stream = self._connect(request)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_sync/connection.py", line 156, in _connect
+    stream = stream.start_tls(**kwargs)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_backends/sync.py", line 154, in start_tls
+    with map_exceptions(exc_map):
+         ~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectTimeout: _ssl.c:1015: The handshake operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/sources/vnstock.py", line 797, in get_ohlcv
+    rows = self._client.get_ohlcv(
+        symbol=strip_vn_prefix(symbol),
+    ...<3 lines>...
+        is_index=_is_index(symbol),
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/sources/vnstock.py", line 501, in get_ohlcv
+    resp = self._http.get(url, params=params)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_client.py", line 1053, in get
+    return self.request(
+           ~~~~~~~~~~~~^
+        "GET",
+        ^^^^^^
+    ...<7 lines>...
+        extensions=extensions,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_client.py", line 914, in send
+    response = self._send_handling_auth(
+        request,
+    ...<2 lines>...
+        history=[],
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+        request,
+        follow_redirects=follow_redirects,
+        history=history,
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_client.py", line 979, in _send_handling_redirects
+    response = self._send_single_request(request)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_client.py", line 1014, in _send_single_request
+    response = transport.handle_request(request)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 249, in handle_request
+    with map_httpcore_exceptions():
+         ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectTimeout: _ssl.c:1015: The handshake operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 760, in <module>
+    raw: pl.DataFrame = asyncio.run(
+                        ~~~~~~~~~~~^
+        data_manager.get_ohlcv(
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        )
+        ^
+    )
+    ^
+  File "/Users/s2997726/miniconda3/lib/python3.13/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/manager.py", line 378, in get_ohlcv
+    result = await self.get(DataType.OHLCV, symbols, start=start, end=end, interval=interval)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/manager.py", line 106, in get
+    frames = await asyncio.gather(
+             ^^^^^^^^^^^^^^^^^^^^^
+        *(self._fetch_with_cache(data_type, symbol, **kwargs) for symbol in resolved_symbols)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/manager.py", line 141, in _fetch_with_cache
+    return await self._fetch_store_and_reload(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/manager.py", line 210, in _fetch_store_and_reload
+    await source.fetch(data_type, symbol, **range_kwargs),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/sources/vnstock.py", line 762, in fetch
+    return await self.get_ohlcv(
+           ^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/data/sources/vnstock.py", line 805, in get_ohlcv
+    raise DataSourceError(str(exc), symbol, (start, end)) from exc
+qts.core.errors.DataSourceError: _ssl.c:1015: The handshake operation timed out [VN:ACB] (2018-01-01 -> 2018-01-01)

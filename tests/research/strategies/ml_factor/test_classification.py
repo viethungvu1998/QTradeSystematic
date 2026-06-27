@@ -23,6 +23,7 @@ from qts.research.strategies.ml_factor.models.xgb import (
 )
 from qts.research.strategies.ml_factor.strategy import MLFactorStrategy
 from qts.utils.labels import (
+    class_labels_from_probabilities,
     MLFactorClass,
     MLFactorClassThresholds,
     class_scores_from_probabilities,
@@ -282,6 +283,26 @@ def test_class_scores_from_probabilities_shape_and_classes():
     assert scores.tolist() == pytest.approx(ML_FACTOR_CLASS_SCORES.tolist())
     assert metrics["accuracy"] == pytest.approx(1.0)
     assert metrics["macro_f1"] == pytest.approx(1.0)
+
+
+def test_class_labels_from_probabilities_respects_ordinal_structure():
+    probabilities = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 1.0],
+            [0.05, 0.45, 0.0, 0.45, 0.05],
+            [0.0, 0.40, 0.20, 0.40, 0.0],
+            [0.20, 0.20, 0.20, 0.20, 0.20],
+        ],
+        dtype=float,
+    )
+
+    labels = class_labels_from_probabilities(probabilities)
+
+    assert labels.tolist() == [0, 1, 2, 3, 4, 2, 2, 2]
 
 
 def test_xgb_classifier_output_shape_and_score_range():

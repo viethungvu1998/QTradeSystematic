@@ -46,6 +46,7 @@ def make_vn_manager(runtime_root: Path) -> DataManager:
         stock_source=None,
         crypto_source=None,
         vn_stock_source=VnstockDataSource.from_env(),
+        vn_stock_fundamentals_source=VnstockDataSource(fundamentals_source="vci"),
         storage=storage,
         cache=cache,
         bundle_adapter=None,

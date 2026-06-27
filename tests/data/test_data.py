@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 import polars as pl
 import pytest
 
+import qts.data.manager as data_manager_module
 from qts.core.errors import DataSourceError, DataSourceWarning
 from qts.core.events import Tick
 from qts.data._schemas import FUTURES_INTRADAY_OHLCV_COLUMNS, OHLCV_COLUMNS, DataType
@@ -118,6 +119,48 @@ def _fundamentals_frame(
         }],
         schema=_FUNDAMENTALS_SCHEMA,
     )
+
+
+def _annual_fundamentals(symbol: str, years: list[int]) -> pl.DataFrame:
+    frames = [
+        _fundamentals_frame(
+            symbol=symbol,
+            period=str(year),
+            fiscal_year=year,
+            quarter=None,
+            report_date=date(year + 1, 2, 28),
+            value=float(year),
+        )
+        for year in years
+    ]
+    return pl.concat(frames, how="vertical") if frames else pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+
+
+def _quarterly_fundamentals(symbol: str, keys: list[tuple[int, int]]) -> pl.DataFrame:
+    frames = [
+        _fundamentals_frame(
+            symbol=symbol,
+            period=f"{year}-Q{quarter}",
+            fiscal_year=year,
+            quarter=quarter,
+            report_date=date(year, min(quarter * 3, 12), 28),
+            value=float(year * 10 + quarter),
+        )
+        for year, quarter in keys
+    ]
+    return pl.concat(frames, how="vertical") if frames else pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+
+
+def _write_vn_fundamentals_cache(
+    root: object,
+    symbol: str,
+    termtype: int,
+    frame: pl.DataFrame,
+) -> None:
+    label = "annual" if termtype == 1 else "quarterly"
+    path = root / "vn_fundamentals" / f"{symbol.split(':', 1)[1]}_{label}.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.write_parquet(path)
 
 
 class FakeKBSFundamentalsClient:
@@ -598,6 +641,233 @@ async def test_data_manager_vn_stock_routing(tmp_path, vn_stock_ohlcv):
     assert data.height > 0
     assert "vn_stock_prices" in duck.list_keys()
     assert not (tmp_path / "bundle" / "qts-stock-bundle").exists()
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetch_vn_fundamentals_uses_cache_without_crawling(tmp_path, monkeypatch):
+    monkeypatch.setattr(data_manager_module, "cache_dir", lambda: tmp_path)
+    symbol = "VN:VNM"
+    annual = _annual_fundamentals(symbol, [2024, 2025])
+    quarterly = _quarterly_fundamentals(
+        symbol,
+        [(2024, 1), (2024, 2), (2024, 3), (2024, 4), (2025, 1), (2025, 2), (2025, 3), (2025, 4)],
+    )
+    _write_vn_fundamentals_cache(tmp_path, symbol, 1, annual)
+    _write_vn_fundamentals_cache(tmp_path, symbol, 2, quarterly)
+
+    manager = DataManager(
+        stock_source=None,
+        vn_stock_source=VnstockDataSource(fundamentals_source="vci"),
+        crypto_source=None,
+        storage=DuckDBStorage(),
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    calls: list[tuple[list[str], int, int, bool]] = []
+
+    async def fake_bulk(symbols, termtype=1, pages=3, force_refresh=False):
+        calls.append((symbols, termtype, pages, force_refresh))
+
+    monkeypatch.setattr(manager, "bulk_fetch_vn_fundamentals", fake_bulk)
+
+    result = await manager.fetch_vn_fundamentals(
+        [symbol],
+        start=date(2024, 1, 1),
+        end=date(2025, 12, 31),
+    )
+
+    assert calls == []
+    assert set(result["frequency"].unique().to_list()) == {"annual", "quarterly"}
+    assert set(result.filter(pl.col("frequency") == "annual")["fiscal_year"].unique().to_list()) == {2024, 2025}
+    assert set(
+        result.filter(pl.col("frequency") == "quarterly").select(["fiscal_year", "quarter"]).iter_rows()
+    ) == {
+        (2024, 1),
+        (2024, 2),
+        (2024, 3),
+        (2024, 4),
+        (2025, 1),
+        (2025, 2),
+        (2025, 3),
+        (2025, 4),
+    }
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetch_vn_fundamentals_fetches_only_missing_annual_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(data_manager_module, "cache_dir", lambda: tmp_path)
+    symbol = "VN:VNM"
+    _write_vn_fundamentals_cache(tmp_path, symbol, 1, _annual_fundamentals(symbol, [2025]))
+    _write_vn_fundamentals_cache(
+        tmp_path,
+        symbol,
+        2,
+        _quarterly_fundamentals(
+            symbol,
+            [(2024, 1), (2024, 2), (2024, 3), (2024, 4), (2025, 1), (2025, 2), (2025, 3), (2025, 4)],
+        ),
+    )
+
+    manager = DataManager(
+        stock_source=None,
+        vn_stock_source=VnstockDataSource(fundamentals_source="vci"),
+        crypto_source=None,
+        storage=DuckDBStorage(),
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    calls: list[tuple[list[str], int, int, bool]] = []
+
+    async def fake_bulk(symbols, termtype=1, pages=3, force_refresh=False):
+        calls.append((list(symbols), termtype, pages, force_refresh))
+        if termtype == 1:
+            # Simulate force refresh overwriting the cache with the new fetch window only.
+            _write_vn_fundamentals_cache(
+                tmp_path,
+                symbol,
+                1,
+                _annual_fundamentals(symbol, [2024, 2025]),
+            )
+
+    monkeypatch.setattr(manager, "bulk_fetch_vn_fundamentals", fake_bulk)
+
+    result = await manager.fetch_vn_fundamentals(
+        [symbol],
+        start=date(2024, 1, 1),
+        end=date(2025, 12, 31),
+    )
+
+    assert calls == [([symbol], 1, 1, True)]
+    annual_rows = result.filter(pl.col("frequency") == "annual")
+    assert set(annual_rows["fiscal_year"].unique().to_list()) == {2024, 2025}
+    merged_cache = pl.read_parquet(tmp_path / "vn_fundamentals" / "VNM_annual.parquet")
+    assert merged_cache.filter(pl.col("fiscal_year") == 2025).height == 1
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetch_vn_fundamentals_fetches_only_missing_quarterly_cache(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(data_manager_module, "cache_dir", lambda: tmp_path)
+    symbol = "VN:VNM"
+    _write_vn_fundamentals_cache(tmp_path, symbol, 1, _annual_fundamentals(symbol, [2024, 2025]))
+    _write_vn_fundamentals_cache(
+        tmp_path,
+        symbol,
+        2,
+        _quarterly_fundamentals(
+            symbol,
+            [(2024, 2), (2024, 3), (2024, 4), (2025, 1), (2025, 2), (2025, 3), (2025, 4)],
+        ),
+    )
+
+    manager = DataManager(
+        stock_source=None,
+        vn_stock_source=VnstockDataSource(fundamentals_source="vci"),
+        crypto_source=None,
+        storage=DuckDBStorage(),
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    calls: list[tuple[list[str], int, int, bool]] = []
+
+    async def fake_bulk(symbols, termtype=1, pages=3, force_refresh=False):
+        calls.append((list(symbols), termtype, pages, force_refresh))
+        if termtype == 2:
+            _write_vn_fundamentals_cache(
+                tmp_path,
+                symbol,
+                2,
+                _quarterly_fundamentals(
+                    symbol,
+                    [(2024, 1), (2024, 2), (2024, 3), (2024, 4), (2025, 1), (2025, 2), (2025, 3), (2025, 4)],
+                ),
+            )
+
+    monkeypatch.setattr(manager, "bulk_fetch_vn_fundamentals", fake_bulk)
+
+    result = await manager.fetch_vn_fundamentals(
+        [symbol],
+        start=date(2024, 1, 1),
+        end=date(2025, 12, 31),
+    )
+
+    assert calls == [([symbol], 2, 2, True)]
+    quarterly_rows = result.filter(pl.col("frequency") == "quarterly")
+    assert set(quarterly_rows.select(["fiscal_year", "quarter"]).iter_rows()) == {
+        (2024, 1),
+        (2024, 2),
+        (2024, 3),
+        (2024, 4),
+        (2025, 1),
+        (2025, 2),
+        (2025, 3),
+        (2025, 4),
+    }
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetch_vn_fundamentals_empty_cache_fetches_both_termtypes(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(data_manager_module, "cache_dir", lambda: tmp_path)
+    symbol = "VN:VNM"
+    manager = DataManager(
+        stock_source=None,
+        vn_stock_source=VnstockDataSource(fundamentals_source="vci"),
+        crypto_source=None,
+        storage=DuckDBStorage(),
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    calls: list[tuple[list[str], int, int, bool]] = []
+
+    async def fake_bulk(symbols, termtype=1, pages=3, force_refresh=False):
+        calls.append((list(symbols), termtype, pages, force_refresh))
+        if termtype == 1:
+            _write_vn_fundamentals_cache(tmp_path, symbol, 1, _annual_fundamentals(symbol, [2024]))
+        else:
+            _write_vn_fundamentals_cache(
+                tmp_path,
+                symbol,
+                2,
+                _quarterly_fundamentals(symbol, [(2024, 1), (2024, 2), (2024, 3), (2024, 4)]),
+            )
+
+    monkeypatch.setattr(manager, "bulk_fetch_vn_fundamentals", fake_bulk)
+
+    result = await manager.fetch_vn_fundamentals(
+        [symbol],
+        start=date(2024, 1, 1),
+        end=date(2024, 12, 31),
+    )
+
+    assert calls == [
+        ([symbol], 1, 1, True),
+        ([symbol], 2, 1, True),
+    ]
+    assert set(result["frequency"].unique().to_list()) == {"annual", "quarterly"}
+
+
+@pytest.mark.asyncio
+async def test_data_manager_fetch_vn_fundamentals_rejects_non_vn_symbols(tmp_path, monkeypatch):
+    monkeypatch.setattr(data_manager_module, "cache_dir", lambda: tmp_path)
+    manager = DataManager(
+        stock_source=None,
+        vn_stock_source=VnstockDataSource(fundamentals_source="vci"),
+        crypto_source=None,
+        storage=DuckDBStorage(),
+        cache=ParquetStorage(tmp_path / "cache"),
+    )
+
+    with pytest.raises(ValueError, match="VN stock symbols only"):
+        await manager.fetch_vn_fundamentals(
+            ["AAPL"],
+            start=date(2024, 1, 1),
+            end=date(2024, 12, 31),
+        )
 
 
 @pytest.mark.asyncio

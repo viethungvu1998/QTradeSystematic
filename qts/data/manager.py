@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, timedelta
+from pathlib import Path
 
 import polars as pl
 
@@ -14,6 +15,8 @@ from qts.data.base import BaseDataSource
 from qts.data.bundles.base import BaseBundleAdapter
 from qts.data.bundles.zipline_ingest import ingest_duckdb_to_bundle
 from qts.data.storage.base import BaseStorage
+from qts.data.vn_symbols import strip_vn_prefix
+from qts.utils.paths import cache_dir
 
 _PRICE_HISTORY_DATA_TYPES: dict[AssetType, DataType] = {
     AssetType.STOCK: DataType.OHLCV,
@@ -36,6 +39,7 @@ class DataManager:
         cache: BaseStorage | None = None,
         bundle_adapter: BaseBundleAdapter | None = None,
         vn_stock_source: BaseDataSource | None = None,
+        vn_stock_fundamentals_source: BaseDataSource | None = None,
         vn_warrant_source: BaseDataSource | None = None,
         vn_futures_source: BaseDataSource | None = None,
         crypto_futures_source: BaseDataSource | None = None,
@@ -81,6 +85,13 @@ class DataManager:
             for asset_type, source in source_map.items()
             for data_type in source.CAPABILITIES
         }
+        if (
+            vn_stock_fundamentals_source is not None
+            and DataType.FUNDAMENTALS in vn_stock_fundamentals_source.CAPABILITIES
+        ):
+            self._capability_map[(AssetType.VN_STOCK, DataType.FUNDAMENTALS)] = (
+                vn_stock_fundamentals_source
+            )
         self._table_map: dict[tuple[AssetType, DataType], str] = {
             (AssetType.STOCK, DataType.OHLCV): self.stock_table,
             (AssetType.VN_STOCK, DataType.OHLCV): self.vn_stock_table,
@@ -405,12 +416,162 @@ class DataManager:
     async def get_fundamentals(self, symbols: list[str]) -> pl.DataFrame:
         return await self.get(DataType.FUNDAMENTALS, symbols)
 
+    async def fetch_vn_fundamentals(
+        self,
+        symbols: list[str],
+        start: date,
+        end: date,
+        show_progress: bool = False,
+    ) -> pl.DataFrame:
+        if start > end:
+            raise ValueError("start must be on or before end")
+
+        vn_symbols = self._normalize_vn_fundamental_symbols(symbols)
+        source = self._capability_map.get((AssetType.VN_STOCK, DataType.FUNDAMENTALS))
+        if source is None:
+            raise ValueError("VN fundamentals source is not configured")
+
+        annual_years = self._requested_annual_years(start, end)
+        quarterly_keys = self._requested_quarterly_keys(start, end)
+
+        annual_missing = [
+            symbol
+            for symbol in vn_symbols
+            if self._missing_annual_years(symbol, annual_years)
+        ]
+        quarterly_missing = [
+            symbol
+            for symbol in vn_symbols
+            if self._missing_quarterly_keys(symbol, quarterly_keys)
+        ]
+
+        if annual_missing:
+            annual_before = {
+                symbol: self._load_vn_fundamentals_cache(symbol, termtype=1)
+                for symbol in annual_missing
+            }
+            annual_pages = max(
+                self._infer_annual_pages(symbol, annual_years) for symbol in annual_missing
+            )
+            await self.bulk_fetch_vn_fundamentals(
+                annual_missing,
+                termtype=1,
+                pages=annual_pages,
+                force_refresh=True,
+                progress_label="Annual fundamentals" if show_progress else None,
+            )
+            self._merge_vn_fundamentals_caches(annual_before, termtype=1)
+            still_missing = [
+                symbol
+                for symbol in annual_missing
+                if self._missing_annual_years(symbol, annual_years)
+            ]
+            if still_missing:
+                annual_pages = max(
+                    self._infer_annual_pages(symbol, annual_years) for symbol in still_missing
+                )
+                await self.bulk_fetch_vn_fundamentals(
+                    still_missing,
+                    termtype=1,
+                    pages=annual_pages,
+                    force_refresh=True,
+                    progress_label="Annual fundamentals retry" if show_progress else None,
+                )
+                self._merge_vn_fundamentals_caches(
+                    {
+                        symbol: self._merge_frames(
+                            annual_before[symbol],
+                            self._load_vn_fundamentals_cache(symbol, termtype=1),
+                        )
+                        for symbol in still_missing
+                    },
+                    termtype=1,
+                )
+
+        if quarterly_missing:
+            quarterly_before = {
+                symbol: self._load_vn_fundamentals_cache(symbol, termtype=2)
+                for symbol in quarterly_missing
+            }
+            quarterly_pages = max(
+                self._infer_quarterly_pages(symbol, quarterly_keys) for symbol in quarterly_missing
+            )
+            await self.bulk_fetch_vn_fundamentals(
+                quarterly_missing,
+                termtype=2,
+                pages=quarterly_pages,
+                force_refresh=True,
+                progress_label="Quarterly fundamentals" if show_progress else None,
+            )
+            self._merge_vn_fundamentals_caches(quarterly_before, termtype=2)
+            still_missing = [
+                symbol
+                for symbol in quarterly_missing
+                if self._missing_quarterly_keys(symbol, quarterly_keys)
+            ]
+            if still_missing:
+                quarterly_pages = max(
+                    self._infer_quarterly_pages(symbol, quarterly_keys) for symbol in still_missing
+                )
+                await self.bulk_fetch_vn_fundamentals(
+                    still_missing,
+                    termtype=2,
+                    pages=quarterly_pages,
+                    force_refresh=True,
+                    progress_label="Quarterly fundamentals retry" if show_progress else None,
+                )
+                self._merge_vn_fundamentals_caches(
+                    {
+                        symbol: self._merge_frames(
+                            quarterly_before[symbol],
+                            self._load_vn_fundamentals_cache(symbol, termtype=2),
+                        )
+                        for symbol in still_missing
+                    },
+                    termtype=2,
+                )
+
+        annual_frames = [
+            self._filter_annual_frame(
+                self._load_vn_fundamentals_cache(symbol, termtype=1),
+                annual_years,
+            ).with_columns(pl.lit("annual").alias("frequency"))
+            for symbol in vn_symbols
+        ]
+        quarterly_frames = [
+            self._filter_quarterly_frame(
+                self._load_vn_fundamentals_cache(symbol, termtype=2),
+                quarterly_keys,
+            ).with_columns(pl.lit("quarterly").alias("frequency"))
+            for symbol in vn_symbols
+        ]
+        nonempty = [frame for frame in [*annual_frames, *quarterly_frames] if frame.height > 0]
+        if not nonempty:
+            return pl.DataFrame()
+
+        combined = pl.concat(nonempty, how="vertical_relaxed")
+        sort_columns = [
+            column
+            for column in [
+                "symbol",
+                "frequency",
+                "fiscal_year",
+                "quarter",
+                "report_date",
+                "report_type",
+                "item_en",
+            ]
+            if column in combined.columns
+        ]
+        return combined.sort(sort_columns) if sort_columns else combined
+
     async def bulk_fetch_vn_fundamentals(
         self,
         symbols: list[str],
         termtype: int = 1,
         pages: int = 3,
         force_refresh: bool = False,
+        progress_label: str | None = None,
     ) -> None:
         """Crawl VN fundamentals for *symbols* with per-request rate limiting.
 
@@ -424,7 +585,9 @@ class DataManager:
         get_fn = getattr(source, "get_fundamentals", None)
         if get_fn is None:
             return
-        for symbol in symbols:
+        progress = self._build_progress(symbols, progress_label)
+        iterator = progress if progress is not None else symbols
+        for symbol in iterator:
             try:
                 await get_fn(
                     symbol,
@@ -435,3 +598,203 @@ class DataManager:
             except Exception:
                 pass
             await asyncio.sleep(0.3)
+        if progress is not None:
+            progress.close()
+
+    def _normalize_vn_fundamental_symbols(self, symbols: list[str]) -> list[str]:
+        unique_symbols = list(dict.fromkeys(symbols))
+        invalid = [symbol for symbol in unique_symbols if AssetType.from_symbol(symbol) is not AssetType.VN_STOCK]
+        if invalid:
+            raise ValueError(f"fetch_vn_fundamentals supports VN stock symbols only: {invalid}")
+        return unique_symbols
+
+    @staticmethod
+    def _build_progress(
+        symbols: list[str],
+        label: str | None,
+    ) -> object | None:
+        if not label or not symbols:
+            return None
+        try:
+            from tqdm.auto import tqdm  # noqa: PLC0415
+        except ImportError:
+            return None
+        return tqdm(symbols, desc=label, unit="symbol")
+
+    @staticmethod
+    def _requested_annual_years(start: date, end: date) -> list[int]:
+        return list(range(start.year, end.year + 1))
+
+    @staticmethod
+    def _requested_quarterly_keys(start: date, end: date) -> list[tuple[int, int]]:
+        keys: list[tuple[int, int]] = []
+        year = start.year
+        quarter = ((start.month - 1) // 3) + 1
+        end_key = (end.year, ((end.month - 1) // 3) + 1)
+        while (year, quarter) <= end_key:
+            keys.append((year, quarter))
+            if quarter == 4:
+                year += 1
+                quarter = 1
+            else:
+                quarter += 1
+        return keys
+
+    @staticmethod
+    def _vn_fundamentals_cache_path(symbol: str, termtype: int) -> Path:
+        label = "annual" if termtype == 1 else "quarterly"
+        return cache_dir() / "vn_fundamentals" / f"{strip_vn_prefix(symbol)}_{label}.parquet"
+
+    def _load_vn_fundamentals_cache(self, symbol: str, *, termtype: int) -> pl.DataFrame:
+        path = self._vn_fundamentals_cache_path(symbol, termtype)
+        if not path.exists():
+            return pl.DataFrame()
+        return pl.read_parquet(path)
+
+    def _load_vn_fundamentals_cache_columns(
+        self,
+        symbol: str,
+        *,
+        termtype: int,
+        columns: list[str],
+    ) -> pl.DataFrame:
+        path = self._vn_fundamentals_cache_path(symbol, termtype)
+        if not path.exists():
+            return pl.DataFrame()
+        return pl.read_parquet(path, columns=columns)
+
+    def _missing_annual_years(self, symbol: str, years: list[int]) -> list[int]:
+        frame = self._load_vn_fundamentals_cache_columns(symbol, termtype=1, columns=["fiscal_year"])
+        if frame.is_empty() or "fiscal_year" not in frame.columns:
+            return years
+        covered = {
+            int(value)
+            for value in frame["fiscal_year"].drop_nulls().cast(pl.Int64).to_list()
+        }
+        return [year for year in years if year not in covered]
+
+    def _missing_quarterly_keys(
+        self,
+        symbol: str,
+        keys: list[tuple[int, int]],
+    ) -> list[tuple[int, int]]:
+        frame = self._load_vn_fundamentals_cache_columns(
+            symbol,
+            termtype=2,
+            columns=["fiscal_year", "quarter"],
+        )
+        if frame.is_empty() or "fiscal_year" not in frame.columns or "quarter" not in frame.columns:
+            return keys
+        covered = {
+            (int(row[0]), int(row[1]))
+            for row in frame.select(
+                pl.col("fiscal_year").cast(pl.Int64),
+                pl.col("quarter").cast(pl.Int64, strict=False),
+            ).drop_nulls().iter_rows()
+        }
+        return [key for key in keys if key not in covered]
+
+    def _infer_annual_pages(self, symbol: str, years: list[int]) -> int:
+        missing = self._missing_annual_years(symbol, years)
+        if not missing:
+            return 1
+        frame = self._load_vn_fundamentals_cache_columns(symbol, termtype=1, columns=["fiscal_year"])
+        latest_year = years[-1]
+        if not frame.is_empty() and "fiscal_year" in frame.columns:
+            cached_max = frame.select(pl.col("fiscal_year").cast(pl.Int64).max()).item()
+            if cached_max is not None:
+                latest_year = max(latest_year, int(cached_max))
+        span = max(1, latest_year - min(missing) + 1)
+        return max(1, (span + 3) // 4)
+
+    def _infer_quarterly_pages(self, symbol: str, keys: list[tuple[int, int]]) -> int:
+        missing = self._missing_quarterly_keys(symbol, keys)
+        if not missing:
+            return 1
+        latest_year, latest_quarter = keys[-1]
+        frame = self._load_vn_fundamentals_cache_columns(
+            symbol,
+            termtype=2,
+            columns=["fiscal_year", "quarter"],
+        )
+        if not frame.is_empty() and {"fiscal_year", "quarter"}.issubset(frame.columns):
+            latest_cached = frame.select(
+                (
+                    pl.col("fiscal_year").cast(pl.Int64) * 4
+                    + pl.col("quarter").cast(pl.Int64, strict=False)
+                ).max()
+            ).item()
+            if latest_cached is not None:
+                latest_cached = int(latest_cached)
+                latest_year = max(latest_year, (latest_cached - 1) // 4)
+                latest_quarter = max(latest_quarter, ((latest_cached - 1) % 4) + 1)
+        latest_index = latest_year * 4 + latest_quarter - 1
+        oldest_year, oldest_quarter = min(missing)
+        oldest_index = oldest_year * 4 + oldest_quarter - 1
+        span = max(1, latest_index - oldest_index + 1)
+        return max(1, (span + 3) // 4)
+
+    def _merge_vn_fundamentals_caches(
+        self,
+        previous_frames: dict[str, pl.DataFrame],
+        *,
+        termtype: int,
+    ) -> None:
+        for symbol, previous in previous_frames.items():
+            path = self._vn_fundamentals_cache_path(symbol, termtype)
+            current = self._load_vn_fundamentals_cache(symbol, termtype=termtype)
+            merged = self._merge_frames(previous, current)
+            if merged.height == 0:
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            merged.write_parquet(path)
+
+    @staticmethod
+    def _merge_frames(previous: pl.DataFrame, current: pl.DataFrame) -> pl.DataFrame:
+        nonempty = [frame for frame in (previous, current) if frame.height > 0]
+        if not nonempty:
+            return pl.DataFrame()
+        merged = pl.concat(nonempty, how="vertical_relaxed")
+        identity = [
+            column
+            for column in [
+                "symbol",
+                "report_type",
+                "period",
+                "fiscal_year",
+                "quarter",
+                "report_date",
+                "item_en",
+            ]
+            if column in merged.columns
+        ]
+        if not identity:
+            return merged
+        return merged.unique(subset=identity, keep="last", maintain_order=True)
+
+    @staticmethod
+    def _filter_annual_frame(frame: pl.DataFrame, years: list[int]) -> pl.DataFrame:
+        if frame.is_empty() or "fiscal_year" not in frame.columns:
+            return frame
+        return frame.filter(pl.col("fiscal_year").cast(pl.Int64).is_in(years))
+
+    @staticmethod
+    def _filter_quarterly_frame(
+        frame: pl.DataFrame,
+        keys: list[tuple[int, int]],
+    ) -> pl.DataFrame:
+        if frame.is_empty() or not {"fiscal_year", "quarter"}.issubset(frame.columns):
+            return frame
+        key_frame = pl.DataFrame(
+            keys,
+            schema=["fiscal_year", "quarter"],
+            orient="row",
+        )
+        return frame.join(
+            key_frame.with_columns(
+                pl.col("fiscal_year").cast(frame.schema["fiscal_year"]),
+                pl.col("quarter").cast(frame.schema["quarter"]),
+            ),
+            on=["fiscal_year", "quarter"],
+            how="inner",
+        )

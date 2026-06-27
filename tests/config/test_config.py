@@ -198,6 +198,152 @@ train_window: 126
     assert config.rebalance_frequency == "monthly"
 
 
+def test_loader_parses_multiple_test_intervals(config_dir):
+    path = config_dir / "multi_interval_research.yaml"
+    path.write_text(
+        """
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL]
+start_date: "2020-01-01"
+end_date: "2026-05-31"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  forward_returns:
+    periods: []
+strategy:
+  type: factor
+  params: {}
+validation:
+  method: multi_interval
+  test_intervals:
+    - start_date: "2021-01-01"
+      end_date: "2023-01-01"
+    - start_date: "2024-01-01"
+      end_date: "2026-05-30"
+backtest_engine: vectorbt
+"""
+    )
+
+    config = load_config(path)
+
+    assert config.validation is not None
+    assert config.validation.method == "multi_interval"
+    actual = [
+        (item.start_date.isoformat(), item.end_date.isoformat())
+        for item in config.validation.test_intervals
+    ]
+    assert actual == [
+        ("2021-01-01", "2023-01-01"),
+        ("2024-01-01", "2026-05-30"),
+    ]
+
+
+def test_loader_keeps_legacy_top_level_test_start_date(config_dir):
+    path = config_dir / "legacy_test_start_research.yaml"
+    path.write_text(
+        """
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL]
+start_date: "2020-01-01"
+end_date: "2026-05-31"
+test_start_date: "2023-01-01"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  forward_returns:
+    periods: []
+strategy:
+  type: factor
+  params: {}
+backtest_engine: vectorbt
+"""
+    )
+
+    config = load_config(path)
+
+    assert config.test_start_date.isoformat() == "2023-01-01"
+    assert config.validation is not None
+    assert config.validation.test_start_date.isoformat() == "2023-01-01"
+    assert config.validation.test_intervals == []
+
+
+def test_loader_rejects_reversed_test_interval(config_dir):
+    path = config_dir / "reversed_interval.yaml"
+    path.write_text(
+        """
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL]
+start_date: "2020-01-01"
+end_date: "2026-05-31"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  forward_returns:
+    periods: []
+strategy:
+  type: factor
+  params: {}
+validation:
+  method: multi_interval
+  test_intervals:
+    - start_date: "2023-01-01"
+      end_date: "2021-01-01"
+backtest_engine: vectorbt
+"""
+    )
+
+    with pytest.raises(ConfigError, match="start_date"):
+        load_config(path)
+
+
+def test_loader_rejects_overlapping_test_intervals(config_dir):
+    path = config_dir / "overlapping_intervals.yaml"
+    path.write_text(
+        """
+workflow: research
+asset_types: [stock]
+universe:
+  stock: [AAPL]
+start_date: "2020-01-01"
+end_date: "2026-05-31"
+initial_capital: 100000
+data_sources:
+  stock: fmp
+storage: duckdb
+features:
+  forward_returns:
+    periods: []
+strategy:
+  type: factor
+  params: {}
+validation:
+  method: multi_interval
+  test_intervals:
+    - start_date: "2021-01-01"
+      end_date: "2023-01-01"
+    - start_date: "2022-01-01"
+      end_date: "2024-01-01"
+backtest_engine: vectorbt
+"""
+    )
+
+    with pytest.raises(ConfigError, match="overlap"):
+        load_config(path)
+
+
 def test_loader_resolves_universe_asset_alias(config_dir):
     path = config_dir / "universe_asset.yaml"
     path.write_text(

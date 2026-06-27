@@ -6,6 +6,7 @@ from qts.research.features.transforms import momentum as _transforms_momentum  #
 from qts.research.features.transforms import price as _transforms_price  # noqa: F401
 from qts.research.features.transforms import quality as _transforms_quality  # noqa: F401
 from qts.research.features.transforms import screener as _transforms_screener  # noqa: F401
+from qts.research.features.transforms import targets as _transforms_targets  # noqa: F401
 
 __all__ = [
     "forward_returns",

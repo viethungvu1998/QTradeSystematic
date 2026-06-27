@@ -1,0 +1,103 @@
+FEATURE_BUILD fwd=21
+FEATURE_BUILD fwd=24
+TRIAL 1/180 sweep_0001_baseline_fwd21_rb12_tw504_top1_n5_d3 features=baseline
+BEST sharpe=0.3899 mdd=0.2937 run=sweep_0001_baseline_fwd21_rb12_tw504_top1_n5_d3
+TRIAL 2/180 sweep_0002_baseline_fwd21_rb12_tw504_top2_n5_d3 features=baseline
+BEST sharpe=0.7573 mdd=0.2201 run=sweep_0002_baseline_fwd21_rb12_tw504_top2_n5_d3
+TRIAL 3/180 sweep_0003_baseline_fwd21_rb12_tw504_top3_n5_d3 features=baseline
+BEST sharpe=0.9259 mdd=0.1993 run=sweep_0003_baseline_fwd21_rb12_tw504_top3_n5_d3
+TRIAL 4/180 sweep_0004_baseline_fwd21_rb12_tw504_top4_n5_d3 features=baseline
+BEST sharpe=0.9572 mdd=0.1584 run=sweep_0004_baseline_fwd21_rb12_tw504_top4_n5_d3
+TRIAL 5/180 sweep_0005_baseline_fwd21_rb12_tw504_top5_n5_d3 features=baseline
+BEST sharpe=1.0117 mdd=0.1479 run=sweep_0005_baseline_fwd21_rb12_tw504_top5_n5_d3
+TRIAL 6/180 sweep_0006_baseline_fwd21_rb12_tw504_top7_n5_d3 features=baseline
+BEST sharpe=1.0277 mdd=0.1852 run=sweep_0006_baseline_fwd21_rb12_tw504_top7_n5_d3
+TRIAL 7/180 sweep_0007_baseline_fwd21_rb12_tw504_top10_n5_d3 features=baseline
+TRIAL 8/180 sweep_0008_volume_ratio_fwd21_rb10_tw504_top2_n5_d3 features=volume_ratio
+TRIAL 9/180 sweep_0009_volume_ratio_fwd21_rb10_tw504_top3_n5_d3 features=volume_ratio
+TRIAL 10/180 sweep_0010_volume_ratio_fwd21_rb10_tw504_top5_n5_d3 features=volume_ratio
+TRIAL 11/180 sweep_0011_volume_ratio_fwd21_rb12_tw504_top2_n5_d3 features=volume_ratio
+TRIAL 12/180 sweep_0012_volume_ratio_fwd21_rb12_tw504_top3_n5_d3 features=volume_ratio
+TRIAL 13/180 sweep_0013_volume_ratio_fwd21_rb12_tw504_top5_n5_d3 features=volume_ratio
+TRIAL 14/180 sweep_0014_volume_ratio_fwd21_rb15_tw504_top2_n5_d3 features=volume_ratio
+Exception ignored on calling ctypes callback function <bound method DataIter._next_wrapper of <xgboost.data.SingleBatchInternalIter object at 0x363ed20a0>>:
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 607, in _next_wrapper
+    def _next_wrapper(self, this: None) -> int:  # pylint: disable=unused-argument
+KeyboardInterrupt: 
+TRIAL 15/180 sweep_0015_volume_ratio_fwd21_rb15_tw504_top3_n5_d3 features=volume_ratio
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.codex_runs/stock_ml_e2e/sweep_ranker.py", line 602, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.codex_runs/stock_ml_e2e/sweep_ranker.py", line 519, in main
+    row, result, predictions, eval_summary = run_trial(
+                                             ~~~~~~~~~^
+        module,
+        ^^^^^^^
+    ...<5 lines>...
+        spec,
+        ^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.codex_runs/stock_ml_e2e/sweep_ranker.py", line 360, in run_trial
+    predictions = module.walk_forward_rank(
+        frame=dataset,
+    ...<13 lines>...
+        else None,
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 497, in walk_forward_rank
+    train_slice = apply_feature_coverage(train_slice, predictor_cols)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 458, in apply_feature_coverage
+    coverage = frame[predictor_cols].notna().sum(axis=1) >= min_non_null
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/frame.py", line 11697, in sum
+    result = super().sum(axis, skipna, numeric_only, min_count, **kwargs)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/generic.py", line 12571, in sum
+    return self._min_count_stat_function(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        "sum", nanops.nansum, axis, skipna, numeric_only, min_count, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/generic.py", line 12554, in _min_count_stat_function
+    return self._reduce(
+           ~~~~~~~~~~~~^
+        func,
+        ^^^^^
+    ...<4 lines>...
+        min_count=min_count,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/frame.py", line 11585, in _reduce
+    df = df.T
+         ^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/frame.py", line 3989, in T
+    return self.transpose()
+           ~~~~~~~~~~~~~~^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/frame.py", line 3890, in transpose
+    dtypes = list(self.dtypes)
+                  ^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/generic.py", line 6483, in dtypes
+    return self._constructor_sliced(data, index=self._info_axis, dtype=np.object_)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/series.py", line 596, in __init__
+    self.name = name
+    ^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/generic.py", line 6342, in __setattr__
+    object.__setattr__(self, name, value)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/series.py", line 789, in name
+    validate_all_hashable(value, error_name=f"{type(self).__name__}.name")
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/dtypes/common.py", line 1600, in validate_all_hashable
+    if not all(is_hashable(arg) for arg in args):
+           ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/dtypes/common.py", line 1600, in <genexpr>
+    if not all(is_hashable(arg) for arg in args):
+               ~~~~~~~~~~~^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pandas/core/dtypes/inference.py", line 366, in is_hashable
+    hash(obj)
+    ~~~~^^^^^
+KeyboardInterrupt

@@ -57,6 +57,10 @@ def test_config_build_from_mapping_resolves_price_transforms(monkeypatch, tmp_pa
         "transforms": [
             {"name": "average_price", "params": {"output_column": "avg_price"}},
             {
+                "name": "log_volume",
+                "params": {"volume_column": "volume", "output_column": "log_volume"},
+            },
+            {
                 "name": "log_price",
                 "params": {"price_column": "avg_price", "output_column": "log_price"},
             },
@@ -69,7 +73,7 @@ def test_config_build_from_mapping_resolves_price_transforms(monkeypatch, tmp_pa
 
     resolved = Config.build_from_mapping(raw)
 
-    assert len(resolved.feature_pipeline.transforms) == 2
+    assert len(resolved.feature_pipeline.transforms) == 3
     assert resolved.feature_pipeline.features[0].price_column == "log_price"
 
 

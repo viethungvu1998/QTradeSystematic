@@ -4,8 +4,14 @@ asset_types: [vn_stock]
 universe: vn100
 
 start_date: "2018-01-01"
-end_date: "2025-12-31"
-test_start_date: "2023-01-01"
+end_date: "2026-05-31"
+validation:
+  method: multi_interval
+  test_intervals:
+    - start_date: "2021-01-01"
+      end_date: "2023-01-01"
+    - start_date: "2024-01-01"
+      end_date: "2026-05-30"
 initial_capital: 100000000
 
 data_sources:
@@ -17,10 +23,20 @@ features:
       params:
         output_column: avg_price
 
+    - name: log_volume
+      params:
+        volume_column: volume
+        output_column: log_volume
+
     - name: log_price
       params:
         price_column: avg_price
         output_column: log_price
+
+    - name: ml_factor_target_class
+      params:
+        target_column: forward_return_{rebalance_period}
+        output_column: forward_return_{rebalance_period}_class
 
     # - name: qsmom
     #   params:
@@ -31,18 +47,37 @@ features:
 
   indicators:
     - name: rsi
-      params: 
+      params:
         periods: [14, 21]
         price_column: log_price
 
     - name: roc
-      params: 
+      params:
         periods: [14, 21]
         price_column: log_price
+
     - name: ma
-      params: 
+      params:
         periods: [5, 10, 20]
         price_column: log_price
+
+    - name: adx
+      params:
+        periods: [14, 21]
+
+    - name: volume_ratio
+      params:
+        volume_column: log_volume
+        windows: [5, 12]
+
+    - name: hist_vol
+      params:
+        price_column: log_price
+        windows: [21, 42]
+
+    - name: zscore
+      params:
+        windows: [10, 21, 42]
 
 strategy:
   type: ml_factor
@@ -52,7 +87,7 @@ strategy:
     cv_gap: 12
     cv_test_size: 12
 
-rebalance_frequency: 12
+rebalance_frequency: 10
 portfolio_construction:
   name: equal_weight
   params:

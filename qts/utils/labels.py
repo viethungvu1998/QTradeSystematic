@@ -20,7 +20,7 @@ from qts.utils.classification import (
 )
 from qts.utils.metrics import normalize_class_probabilities
 
-CLASS_PERCENTILES = (0.15, 0.40, 0.60, 0.85)
+CLASS_PERCENTILES = (0.15, 0.45, 0.55, 0.85)
 CLASS_LABEL_COLUMN = "ml_factor_class"
 ML_FACTOR_CLASS_COUNT = 5
 ML_FACTOR_CLASS_SCORES = np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=float)
@@ -66,13 +66,13 @@ class MLFactorClassThresholds:
             target_col=target_col,
             percentiles=pct,
         )
-        q15, q40, q60, q85 = thresholds.thresholds
+        q1, q2, q3, q4 = thresholds.thresholds
         return cls(
             target_col=target_col,
-            strong_bear_max=float(q15),
-            weak_bear_max=float(q40),
-            no_change_max=float(q60),
-            weak_bull_max=float(q85),
+            strong_bear_max=float(q1),
+            weak_bear_max=float(q2),
+            no_change_max=float(q3),
+            weak_bull_max=float(q4),
         )
 
     @property
@@ -125,6 +125,20 @@ def class_scores_from_probabilities(probabilities: np.ndarray) -> np.ndarray:
     return probability_weighted_class_scores(probabilities, ML_FACTOR_CLASS_SCORES)
 
 
+def class_labels_from_probabilities(probabilities: np.ndarray) -> np.ndarray:
+    """Decode five-class probabilities into ordinal class labels.
+
+    This uses the probability-weighted class score instead of nominal argmax,
+    which reduces the tendency to collapse adjacent uncertainty into classes 1
+    and 3. Exact midpoint ties break toward the less-extreme class.
+    """
+
+    scores = class_scores_from_probabilities(probabilities)
+    distances = np.abs(scores[:, None] - ML_FACTOR_CLASS_SCORES[None, :])
+    centrality_penalty = np.abs(ML_FACTOR_CLASS_SCORES)[None, :] * 1e-12
+    return np.argmin(distances + centrality_penalty, axis=1).astype(np.int16)
+
+
 __all__ = [
     "CLASS_LABEL_COLUMN",
     "CLASS_PERCENTILES",
@@ -133,6 +147,7 @@ __all__ = [
     "MLFactorClass",
     "MLFactorClassThresholds",
     "align_class_probabilities",
+    "class_labels_from_probabilities",
     "class_scores_from_probabilities",
     "normalize_probabilities",
 ]

@@ -1,0 +1,40 @@
+paths:
+  effective_yaml_dir: .qts_notebooke_runtime/yaml/stock_ml_e2e_ranker
+  model_weights_dir: .qts_notebooke_runtime/model_weights/stock_ml_e2e_ranker
+  portfolio_weights_dir: .qts_notebooke_runtime/weights/stock_ml_e2e_ranker
+  report_pdf_dir: output/pdf
+
+run:
+  forward_period: 12
+  train_window: 630
+  rebalance_frequency: 8
+  max_positions: 5
+
+features:
+  selected_groups:
+    - baseline
+  baseline_columns:
+    - close_macd_histogram_50_200_30
+    - close_qsmom_21_252_126
+    - close_roc_0_63
+    - close_roc_0_252
+    - close_rsi_63
+    - close_fip_momentum_252
+    - close_volatility_annualized_252
+
+portfolio:
+  weight_policy: capped_equal_weight
+  min_top_score: 0.061
+  min_score_spread: null
+
+benchmark_regime:
+  enabled: true
+  rule: above_sma
+  window: 21
+  min_periods: null
+
+xgb:
+  n_estimators: 5
+  learning_rate: 0.1
+  max_depth: 3
+  n_jobs: -1

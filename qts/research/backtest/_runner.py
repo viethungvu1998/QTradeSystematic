@@ -11,6 +11,12 @@ from qts.research.backtest.base import BacktestConfig, BacktestResult
 from qts.research.backtest.metrics import build_metrics
 from qts.research.backtest.observability import backtest_frame_observability
 from qts.research.strategies.base import BaseStrategy
+from qts.utils.date_intervals import (
+    date_in_intervals,
+    filter_dates_in_intervals,
+    select_training_dates,
+    test_intervals_from_config,
+)
 
 
 def _rebalance_dates(dates: list[date], frequency: str | int) -> list[date]:
@@ -51,14 +57,26 @@ def walk_forward_signals(
 ) -> pl.DataFrame:
     all_dates = sorted(ohlcv["date"].unique().to_list())
     rebalance_dates = _rebalance_dates(all_dates, config.rebalance_frequency)
+    test_intervals = test_intervals_from_config(config)
+    if test_intervals:
+        rebalance_dates = filter_dates_in_intervals(rebalance_dates, test_intervals)
     date_index = {item: index for index, item in enumerate(all_dates)}
     rows: list[pl.DataFrame] = []
     for rebalance_date in rebalance_dates:
         index = date_index[rebalance_date]
-        window_start = all_dates[max(0, index - config.train_window)]
-        train_slice = ohlcv.filter(
-            (pl.col("date") >= window_start) & (pl.col("date") < rebalance_date)
-        )
+        if test_intervals:
+            train_dates = select_training_dates(
+                all_dates,
+                before=rebalance_date,
+                train_window=config.train_window,
+                test_intervals=test_intervals,
+            )
+            train_slice = ohlcv.filter(pl.col("date").is_in(train_dates))
+        else:
+            window_start = all_dates[max(0, index - config.train_window)]
+            train_slice = ohlcv.filter(
+                (pl.col("date") >= window_start) & (pl.col("date") < rebalance_date)
+            )
         if train_slice.height < 2:
             continue
         featured = pipeline.fit_transform(train_slice)
@@ -140,15 +158,13 @@ def run_backtest_frame(
     metrics = build_metrics(returns_list, equity_list)
     metrics_is: dict[str, float] = {}
     metrics_oos: dict[str, float] = {}
-    test_start = None
-    if config.validation and config.validation.test_start_date:
-        test_start = config.validation.test_start_date
-    elif config.test_start_date:
-        test_start = config.test_start_date
-
-    if test_start is not None:
-        is_daily = daily.filter(pl.col("date") < test_start)
-        oos_daily = daily.filter(pl.col("date") >= test_start)
+    test_intervals = test_intervals_from_config(config)
+    if test_intervals:
+        oos_dates = [
+            item for item in daily["date"].to_list() if date_in_intervals(item, test_intervals)
+        ]
+        is_daily = daily.filter(~pl.col("date").is_in(oos_dates))
+        oos_daily = daily.filter(pl.col("date").is_in(oos_dates))
         if is_daily.height > 1:
             metrics_is = _build_metrics_from_daily(is_daily, capital)
         if oos_daily.height > 1:

@@ -9,6 +9,7 @@ from qts.core.registry import Registry
 from qts.research.features.transforms.price import (
     average_price_transform,
     log_price_transform,
+    log_volume_transform,
 )
 
 
@@ -61,6 +62,28 @@ def test_log_price_transform_nulls_non_positive_prices():
     assert result["log_price"][2] is None
 
 
+def test_log_volume_transform_appends_log_of_selected_volume_column():
+    result = log_volume_transform(
+        _price_frame(),
+        volume_column="volume",
+        output_column="daily_log_volume",
+    )
+
+    assert "daily_log_volume" in result.columns
+    assert isclose(result["daily_log_volume"][0], log(1_000.0))
+    assert isclose(result["daily_log_volume"][1], log(1_100.0))
+
+
+def test_log_volume_transform_nulls_non_positive_volumes():
+    frame = pl.DataFrame({"volume": [1_000.0, 0.0, -1.0]})
+    result = log_volume_transform(frame)
+
+    assert isclose(result["log_volume"][0], log(1_000.0))
+    assert result["log_volume"][1] is None
+    assert result["log_volume"][2] is None
+
+
 def test_price_transforms_register_with_registry_after_module_import():
     assert Registry.get_transform("average_price") is average_price_transform
     assert Registry.get_transform("log_price") is log_price_transform
+    assert Registry.get_transform("log_volume") is log_volume_transform

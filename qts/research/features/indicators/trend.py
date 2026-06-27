@@ -8,13 +8,20 @@ from qts.core.registry import Registry
 from qts.research.features.base import BaseFeature
 
 
-def _true_range_expr() -> pl.Expr:
-    previous_close = pl.col("close").shift(1).over("symbol").fill_null(pl.col("close"))
+def _true_range_expr(
+    *,
+    high_column: str = "high",
+    low_column: str = "low",
+    close_column: str = "close",
+) -> pl.Expr:
+    previous_close = (
+        pl.col(close_column).shift(1).over("symbol").fill_null(pl.col(close_column))
+    )
     return pl.max_horizontal(
         [
-            pl.col("high") - pl.col("low"),
-            (pl.col("high") - previous_close).abs(),
-            (pl.col("low") - previous_close).abs(),
+            pl.col(high_column) - pl.col(low_column),
+            (pl.col(high_column) - previous_close).abs(),
+            (pl.col(low_column) - previous_close).abs(),
         ]
     )
 
@@ -58,17 +65,38 @@ class MACDFeature(BaseFeature):
 class ADXFeature(BaseFeature):
     """Average directional index. Accepts a single period or a list of periods."""
 
-    def __init__(self, period: int | list[int] = 14) -> None:
-        self.periods = [period] if isinstance(period, int) else list(period)
+    def __init__(
+        self,
+        period: int | list[int] = 14,
+        *,
+        periods: list[int] | tuple[int, ...] | None = None,
+        high_column: str = "high",
+        low_column: str = "low",
+        close_column: str = "close",
+        price_column: str | None = None,
+    ) -> None:
+        resolved_periods = periods if periods is not None else period
+        self.periods = (
+            [resolved_periods]
+            if isinstance(resolved_periods, int)
+            else list(resolved_periods)
+        )
+        self.high_column = high_column
+        self.low_column = low_column
+        self.close_column = price_column or close_column
 
     def _compute_period(self, df: pl.DataFrame, period: int) -> pl.DataFrame:
         alpha = 1 / period
         return (
             df
             .with_columns(
-                pl.col("high").diff().over("symbol").alias("_up_move"),
-                (-pl.col("low").diff().over("symbol")).alias("_down_move"),
-                _true_range_expr().alias("_true_range"),
+                pl.col(self.high_column).diff().over("symbol").alias("_up_move"),
+                (-pl.col(self.low_column).diff().over("symbol")).alias("_down_move"),
+                _true_range_expr(
+                    high_column=self.high_column,
+                    low_column=self.low_column,
+                    close_column=self.close_column,
+                ).alias("_true_range"),
             )
             .with_columns(
                 pl.when((pl.col("_up_move") > pl.col("_down_move")) & (pl.col("_up_move") > 0))

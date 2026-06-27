@@ -1,0 +1,62 @@
+Runtime log     : /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/stock_ml_e2e_20260623_193653.log
+Imports OK | repo_root=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic
+Using config: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/vn100_ml_example.yaml
+Benchmark       : VN:VNINDEX
+Forward period  : 21
+Train window    : 504
+Rebalance       : 12
+XGB params      : n_estimators=5, learning_rate=0.1, max_depth=3, n_jobs=-1
+Top positions   : 5
+Prediction rows : 6,966
+Signal rows     : 562
+Signal dates    : 70
+Eval summary    : {'prediction_rows': 6766.0, 'prediction_dates': 68.0, 'top_mean_forward_return': 0.03250972992458843}
+Engine: VectorBTProEngine
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 831, in <module>
+    export_outputs(
+    ~~~~~~~~~~~~~~^
+        run_id=run_id,
+        ^^^^^^^^^^^^^^
+    ...<2 lines>...
+        benchmark_rets=benchmark_rets,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 585, in export_outputs
+    save_tearsheet(result, tearsheet_dir(), run_id, benchmark_rets=benchmark_rets)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/backtest/tearsheet.py", line 34, in save_tearsheet
+    import pyfolio as pf
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pyfolio/__init__.py", line 1, in <module>
+    from . import capacity
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pyfolio/capacity.py", line 5, in <module>
+    from . import pos
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/pyfolio/pos.py", line 20, in <module>
+    from zipline.assets import Equity, Future
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/zipline/__init__.py", line 29, in <module>
+    from .utils.run_algo import run_algorithm
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/zipline/utils/run_algo.py", line 24, in <module>
+    from zipline.pipeline.data import USEquityPricing
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/zipline/pipeline/__init__.py", line 10, in <module>
+    from .engine import SimplePipelineEngine
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/zipline/pipeline/engine.py", line 76, in <module>
+    from .hooks import DelegatingHooks
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/zipline/pipeline/hooks/__init__.py", line 4, in <module>
+    from .progress import ProgressHooks
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/zipline/pipeline/hooks/progress.py", line 279, in <module>
+    from IPython.display import display, HTML as IPython_HTML
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/IPython/__init__.py", line 56, in <module>
+    from .terminal.embed import embed
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/IPython/terminal/embed.py", line 16, in <module>
+    from IPython.terminal.interactiveshell import TerminalInteractiveShell
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/IPython/terminal/interactiveshell.py", line 11, in <module>
+    from IPython.core.kitty import (
+    ...<2 lines>...
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/IPython/core/kitty.py", line 36, in <module>
+    supports_kitty_graphics = _supports_kitty_graphics()
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/IPython/core/kitty.py", line 13, in _supports_kitty_graphics
+    if not sys.stdout.isatty():
+           ^^^^^^^^^^^^^^^^^
+AttributeError: 'TeeStream' object has no attribute 'isatty'

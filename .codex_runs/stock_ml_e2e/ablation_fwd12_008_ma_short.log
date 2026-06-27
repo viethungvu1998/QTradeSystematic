@@ -1,0 +1,124 @@
+Runtime log     : /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/stock_ml_e2e_20260623_200634.log
+Imports OK | repo_root=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic
+Using config: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/vn100_ml_example.yaml
+Benchmark       : VN:VNINDEX
+Forward period  : 12
+Train window    : 504
+Rebalance       : 12
+Experiment ID   : ma_short
+Feature groups  : baseline,ma_short
+Predictor count : 10
+XGB params      : n_estimators=5, learning_rate=0.1, max_depth=3, n_jobs=-1
+Top positions   : 5
+Prediction rows : 6,966
+Signal rows     : 581
+Signal dates    : 70
+Eval summary    : {'prediction_rows': 6866.0, 'prediction_dates': 69.0, 'top_mean_forward_return': 0.01689162046946966}
+Engine: VectorBTProEngine
+<IPython.core.display.HTML object>
+<IPython.core.display.HTML object>
+<IPython.core.display.HTML object>
+Metrics         : {'sharpe': 0.6013529283976399, 'sortino': 0.4696231456565877, 'cagr': 0.07411234811756806, 'max_drawdown': 0.24349954421294806, 'win_rate': 0.21994274809160305}
+Exports         : /Users/s2997726/.qts/exports/backtest
+Runtime report  : /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/vn_reference_xgb_ranker_ma_short_top5_fwd12_rb12_20260623_200733_report.md
+Ablation results: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/ablation_results.tsv
+Ablation ranking: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/ablation_ranking.md
+
+# stock_ml_e2e runtime report: vn_reference_xgb_ranker_ma_short_top5_fwd12_rb12_20260623_200733
+
+## Strategy
+| Item | Value |
+| --- | --- |
+| benchmark | VN:VNINDEX |
+| forward_period | 12 |
+| train_window | 504 |
+| rebalance | 12 |
+| top_positions | 5 |
+| experiment_id | ma_short |
+| feature_groups | baseline,ma_short |
+| predictor_count | 10 |
+| xgb_n_estimators | 5 |
+| xgb_learning_rate | 0.100000 |
+| xgb_max_depth | 3 |
+
+## Predictor columns
+| Predictor |
+| --- |
+| close_macd_histogram_50_200_30 |
+| close_qsmom_21_252_126 |
+| close_roc_0_63 |
+| close_roc_0_252 |
+| close_rsi_63 |
+| close_fip_momentum_252 |
+| close_volatility_annualized_252 |
+| ma_5 |
+| ma_10 |
+| ma_20 |
+
+## Full-period stats
+| Metric | Value |
+| --- | --- |
+| sharpe | 0.601353 |
+| sortino | 0.469623 |
+| cagr | 0.074112 |
+| max_drawdown | 0.243500 |
+| win_rate | 0.219943 |
+
+## Active-period stats from 2023-01-01
+| Metric | Value |
+| --- | --- |
+| sharpe | 0.947775 |
+| sortino | 1.164888 |
+| cagr | 0.194187 |
+| max_drawdown | 0.243500 |
+| win_rate | 0.545562 |
+
+## Ranker evaluation
+| Metric | Value |
+| --- | --- |
+| prediction_rows | 6866.000000 |
+| prediction_dates | 69.000000 |
+| top_mean_forward_return | 0.016892 |
+
+## Active-period portfolio snapshots
+| Date | Positions | Holdings after rebalance |
+| --- | --- | --- |
+| 2025-06-19 | 5 | CMG 20%, DIG 20%, EVF 20%, GEE 20%, SBT 20% |
+| 2025-07-07 | 5 | ANV 20%, CMG 20%, GEX 20%, VHM 20%, VIC 20% |
+| 2025-07-23 | 5 | ACB 20%, CMG 20%, DXS 20%, MBB 20%, SBT 20% |
+| 2025-08-08 | 5 | ANV 20%, GEX 20%, SBT 20%, SHB 20%, STB 20% |
+| 2025-08-26 | 5 | GEX 20%, LPB 20%, VIX 20%, VPB 20%, VSC 20% |
+| 2025-09-15 | 5 | DXG 20%, GEE 20%, GEX 20%, SBT 20%, SHB 20% |
+| 2025-10-01 | 5 | DXS 20%, SBT 20%, SHB 20%, VHM 20%, VIX 20% |
+| 2025-10-17 | 5 | CII 20%, LPB 20%, SBT 20%, SHB 20%, VRE 20% |
+| 2025-11-04 | 5 | LPB 20%, SBT 20%, VHM 20%, VIX 20%, VSC 20% |
+| 2025-11-20 | 5 | DXS 20%, GEX 20%, VHM 20%, VIX 20%, VSC 20% |
+| 2025-12-08 | 5 | ACB 20%, BSI 20%, BWE 20%, DXS 20%, SBT 20% |
+| 2025-12-24 | 5 | BSI 20%, BWE 20%, DGC 20%, HSG 20%, SBT 20% |
+| 2026-01-13 | 5 | DGC 20%, DXG 20%, HDC 20%, PAN 20%, SSB 20% |
+| 2026-01-29 | 5 | CTS 20%, DXG 20%, DXS 20%, GEE 20%, HDC 20% |
+| 2026-02-23 | 5 | DGC 20%, FPT 20%, HDC 20%, MWG 20%, SSB 20% |
+| 2026-03-11 | 5 | BSI 20%, DIG 20%, DXS 20%, FPT 20%, HDC 20% |
+| 2026-03-27 | 5 | CTS 20%, DGC 20%, DXS 20%, FPT 20%, HDC 20% |
+| 2026-04-14 | 5 | DGC 20%, FPT 20%, FTS 20%, HDC 20%, SSB 20% |
+| 2026-05-05 | 5 | CMG 20%, DBC 20%, DGC 20%, FPT 20%, PPC 20% |
+| 2026-05-21 | 5 | DBC 20%, DGC 20%, KDH 20%, PPC 20%, SZC 20% |
+
+## Most frequent active-period holdings
+| Symbol | Rebalance count |
+| --- | --- |
+| DXS | 35 |
+| LPB | 21 |
+| NAB | 20 |
+| VIX | 15 |
+| SHB | 13 |
+| EVF | 12 |
+| GEE | 12 |
+| DGC | 11 |
+| FPT | 11 |
+| DXG | 10 |
+| CMG | 9 |
+| SBT | 9 |
+| VHM | 8 |
+| FRT | 8 |
+| PDR | 7 |
