@@ -39,3 +39,19 @@ def log_price_transform(
         .otherwise(None)
         .alias(output_column)
     )
+
+
+@Registry.register_transform("log_volume")
+def log_volume_transform(
+    df: pl.DataFrame,
+    *,
+    volume_column: str = "volume",
+    output_column: str = "log_volume",
+) -> pl.DataFrame:
+    """Append the natural log of a positive volume column."""
+    return df.with_columns(
+        pl.when(pl.col(volume_column) > 0)
+        .then(pl.col(volume_column).log())
+        .otherwise(None)
+        .alias(output_column)
+    )

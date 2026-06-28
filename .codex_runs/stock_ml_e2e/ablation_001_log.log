@@ -1,0 +1,48 @@
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 39, in <module>
+    import qts as qts_lib
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/__init__.py", line 6, in <module>
+    from qts.research.backtest import engines, simulation  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/backtest/engines/__init__.py", line 3, in <module>
+    from qts.research.backtest.engines import vectorbtpro_engine, zipline_engine
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/backtest/engines/vectorbtpro_engine.py", line 11, in <module>
+    from qts.research.backtest._runner import walk_forward_signals
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/backtest/_runner.py", line 10, in <module>
+    from qts.research.backtest.base import BacktestConfig, BacktestResult
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/backtest/base.py", line 12, in <module>
+    from qts.research.strategies.base import BaseStrategy
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/strategies/__init__.py", line 3, in <module>
+    from qts.research.strategies import factor, ml_factor, stat_arb, vn100_quantamental
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/strategies/stat_arb/__init__.py", line 5, in <module>
+    from .base import BaseStatArbStrategy
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/strategies/stat_arb/base.py", line 13, in <module>
+    from .core import (
+    ...<9 lines>...
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/strategies/stat_arb/core.py", line 8, in <module>
+    from .pair_selection import (
+    ...<7 lines>...
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/qts/research/strategies/stat_arb/pair_selection.py", line 14, in <module>
+    import statsmodels.api as sm
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/statsmodels/api.py", line 81, in <module>
+    from .discrete.conditional_models import (
+    ...<3 lines>...
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/statsmodels/discrete/conditional_models.py", line 9, in <module>
+    from statsmodels.discrete.discrete_model import (MultinomialResults,
+          MultinomialResultsWrapper)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/statsmodels/discrete/discrete_model.py", line 5587, in <module>
+    wrap.populate_wrapper(OrderedResultsWrapper, OrderedResults)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/statsmodels/base/wrapper.py", line 131, in populate_wrapper
+    wrapper = make_wrapper(func, how)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/statsmodels/base/wrapper.py", line 117, in make_wrapper
+    formatted = str(sig)
+  File "/Users/s2997726/miniconda3/lib/python3.13/inspect.py", line 3325, in __str__
+    return self.format()
+           ~~~~~~~~~~~^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/inspect.py", line 3339, in format
+    formatted = str(param)
+KeyboardInterrupt

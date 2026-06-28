@@ -16,6 +16,7 @@ from qts.research.backtest.base import (
     empty_backtest_result,
 )
 from qts.utils.export import (
+    export_backtest_report_pdf,
     export_live_portfolio,
     export_portfolio_snapshots,
     export_trade_log,
@@ -136,6 +137,44 @@ def test_export_live_portfolio_writes_cash_column(tmp_path):
             "current_price": 50.0,
         }
     ]
+
+
+def test_export_backtest_report_pdf_copies_tearsheet(tmp_path, monkeypatch):
+    source_pdf = tmp_path / "tearsheets" / "run_001_tearsheet.pdf"
+
+    def fake_save_tearsheet(result, out_dir, run_id, benchmark_rets=None):
+        del result, benchmark_rets
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{run_id}_tearsheet.pdf"
+        path.write_bytes(b"%PDF-1.4\n% test pdf\n%%EOF\n")
+        return path
+
+    monkeypatch.setattr("qts.utils.export.save_tearsheet", fake_save_tearsheet)
+
+    report = export_backtest_report_pdf(
+        _result(),
+        run_id="run_001",
+        output_dir=tmp_path / "pdf",
+        tearsheet_out_dir=source_pdf.parent,
+        filename="stable_report.pdf",
+    )
+
+    assert report == tmp_path / "pdf" / "stable_report.pdf"
+    assert report.exists()
+    assert report.read_bytes() == source_pdf.read_bytes()
+
+
+def test_export_backtest_report_pdf_returns_none_when_tearsheet_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr("qts.utils.export.save_tearsheet", lambda *args, **kwargs: None)
+
+    report = export_backtest_report_pdf(
+        _result(),
+        run_id="run_001",
+        output_dir=tmp_path / "pdf",
+    )
+
+    assert report is None
+    assert not (tmp_path / "pdf").exists()
 
 
 def test_empty_backtest_result_has_observability_schemas():

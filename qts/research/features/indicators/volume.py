@@ -31,15 +31,34 @@ class OBVFeature(BaseFeature):
 class VolumeRatioFeature(BaseFeature):
     """Volume divided by rolling mean volume. Accepts a single window or a list of windows."""
 
-    def __init__(self, window: int | list[int] = 20) -> None:
-        self.windows = [window] if isinstance(window, int) else list(window)
+    def __init__(
+        self,
+        window: int | list[int] = 20,
+        *,
+        windows: list[int] | tuple[int, ...] | None = None,
+        volume_column: str = "volume",
+    ) -> None:
+        resolved_windows = windows if windows is not None else window
+        self.windows = (
+            [resolved_windows]
+            if isinstance(resolved_windows, int)
+            else list(resolved_windows)
+        )
+        self.volume_column = volume_column
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         result = df.sort(["symbol", "date"])
         for w in self.windows:
             result = result.with_columns(
-                (pl.col("volume")
-                 / (pl.col("volume").rolling_mean(w, min_samples=w).over("symbol") + 1e-8))
+                (
+                    pl.col(self.volume_column)
+                    / (
+                        pl.col(self.volume_column)
+                        .rolling_mean(w, min_samples=w)
+                        .over("symbol")
+                        + 1e-8
+                    )
+                )
                 .alias(f"vol_ratio_{w}")
             )
         return self._validate_append_only(df, result)

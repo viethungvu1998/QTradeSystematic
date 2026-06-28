@@ -95,3 +95,31 @@ def test_momentum_indicators_use_configured_price_column():
     assert result["rsi_3"][3] > 99.0
     assert isclose(result["roc_2"][4], (5.0 / 3.0) - 1.0)
     assert isclose(result["ma_3"][2], 2.0)
+
+
+def test_config_aligned_indicators_support_transformed_columns():
+    fixture = _indicator_fixture().with_columns(
+        ((pl.col("high") + pl.col("low") + pl.col("close")) / 3.0).alias("avg_price"),
+        pl.col("volume").log().alias("log_volume"),
+    ).with_columns(
+        pl.col("avg_price").log().alias("log_price")
+    )
+
+    adx = Registry.get_feature("adx")(price_column="log_price", periods=[14, 21])
+    volume_ratio = Registry.get_feature("volume_ratio")(
+        volume_column="log_volume",
+        windows=[5, 12],
+    )
+    hist_vol = Registry.get_feature("hist_vol")(
+        price_column="log_price",
+        windows=[21, 42],
+    )
+
+    result = hist_vol.fit_transform(volume_ratio.fit_transform(adx.fit_transform(fixture)))
+
+    for column in ["adx_14", "adx_21", "vol_ratio_5", "vol_ratio_12", "hist_vol_21", "hist_vol_42"]:
+        assert column in result.columns
+
+    latest = result.sort(["symbol", "date"]).group_by("symbol").tail(1)
+    for column in ["adx_14", "adx_21", "vol_ratio_5", "vol_ratio_12", "hist_vol_21", "hist_vol_42"]:
+        assert all(value is not None for value in latest[column].to_list())

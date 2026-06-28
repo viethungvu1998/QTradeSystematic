@@ -90,15 +90,23 @@ class BollingerFeature(BaseFeature):
 class HistVolFeature(BaseFeature):
     """Historical volatility."""
 
-    def __init__(self, periods: list[int] | tuple[int, ...] = (20, 60)) -> None:
-        self.periods = list(periods)
+    def __init__(
+        self,
+        periods: list[int] | tuple[int, ...] = (20, 60),
+        *,
+        windows: list[int] | tuple[int, ...] | None = None,
+        price_column: str = "close",
+    ) -> None:
+        self.periods = list(windows if windows is not None else periods)
+        self.price_column = price_column
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
-        result = df.sort(["symbol", "date"]).with_columns(
-            (pl.col("close").log() - pl.col("close").shift(1).over("symbol").log()).alias(
-                "_log_return"
-            )
+        base_return = (
+            pl.col("close").log() - pl.col("close").shift(1).over("symbol").log()
+            if self.price_column == "close"
+            else pl.col(self.price_column) - pl.col(self.price_column).shift(1).over("symbol")
         )
+        result = df.sort(["symbol", "date"]).with_columns(base_return.alias("_log_return"))
         for period in self.periods:
             result = result.with_columns(
                 pl.col("_log_return")

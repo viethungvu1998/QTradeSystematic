@@ -270,7 +270,44 @@ def _resolve_features(raw: BacktestConfig) -> list[BaseFeature]:
 
 
 def _resolve_transforms(raw: BacktestConfig) -> list[BaseFeature]:
+    ml_factor_rebalance_period = (
+        _ml_factor_rebalance_period(raw, raw.strategy.params)
+        if raw.strategy.type == "ml_factor"
+        else None
+    )
     return [
-        _FunctionTransformAdapter(Registry.get_transform(step.name), step.params)
+        _FunctionTransformAdapter(
+            Registry.get_transform(step.name),
+            _resolve_transform_params(
+                step.name,
+                step.params,
+                ml_factor_rebalance_period=ml_factor_rebalance_period,
+            ),
+        )
         for step in raw.features.transforms
     ]
+
+
+def _resolve_transform_params(
+    transform_name: str,
+    params: Mapping[str, Any],
+    *,
+    ml_factor_rebalance_period: int | None,
+) -> dict[str, Any]:
+    resolved = dict(params)
+    if transform_name != "ml_factor_target_class" or ml_factor_rebalance_period is None:
+        return resolved
+
+    tokens = {
+        "rebalance_period": ml_factor_rebalance_period,
+        "rebalance_frequency": ml_factor_rebalance_period,
+    }
+
+    for key in ("target_column", "output_column"):
+        value = resolved.get(key)
+        if isinstance(value, str):
+            resolved[key] = value.format(**tokens)
+
+    resolved.setdefault("target_column", f"forward_return_{ml_factor_rebalance_period}")
+    resolved.setdefault("output_column", f"{resolved['target_column']}_class")
+    return resolved

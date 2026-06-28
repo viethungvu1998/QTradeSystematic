@@ -1,0 +1,18 @@
+Imports OK | repo_root=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic
+Using config: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/vn100_ml_example.yaml
+Benchmark       : VN:VNINDEX
+Forward period  : 21
+Train window    : 504
+Rebalance       : 12
+XGB params      : n_estimators=40, learning_rate=0.1, max_depth=3, n_jobs=-1
+Top positions   : 5
+Prediction rows : 6,949
+Signal rows     : 544
+Signal dates    : 70
+Eval summary    : {'prediction_rows': 6749.0, 'prediction_dates': 68.0, 'top_mean_forward_return': 0.024864098889006352}
+Engine: VectorBTProEngine
+<IPython.core.display.HTML object>
+<IPython.core.display.HTML object>
+<IPython.core.display.HTML object>
+Metrics         : {'sharpe': 0.6333055665528661, 'sortino': 0.4947283165016382, 'cagr': 0.08425466118072555, 'max_drawdown': 0.27124475540441123, 'win_rate': 0.21087786259541985}
+Exports         : /Users/s2997726/.qts/exports/backtest

@@ -163,6 +163,7 @@ Registered feature keys:
 Registered transform keys:
 
 - `qsmom` — QS momentum transform (`features/transforms/momentum.py`)
+- `ml_factor_target_class` — appends five-class labels for `forward_return_*` targets and derives the target column when needed (`features/transforms/targets.py`)
 - `price_preprocessor` — price quality preprocessing (`features/transforms/quality.py`)
 - `universe_screener` — universe filtering (`features/transforms/screener.py`)
 

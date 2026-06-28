@@ -1,0 +1,79 @@
+FEATURE_BUILD fwd=12
+FEATURE_BUILD fwd=15
+FEATURE_BUILD fwd=18
+FEATURE_BUILD fwd=21
+FEATURE_BUILD fwd=24
+TRIAL 1/300 sweep_0001_baseline_fwd21_rb12_tw504_top1_n5_d3 features=baseline
+BEST sharpe=0.3899 mdd=0.2937 run=sweep_0001_baseline_fwd21_rb12_tw504_top1_n5_d3
+TRIAL 2/300 sweep_0002_baseline_fwd21_rb12_tw504_top2_n5_d3 features=baseline
+BEST sharpe=0.7573 mdd=0.2201 run=sweep_0002_baseline_fwd21_rb12_tw504_top2_n5_d3
+TRIAL 3/300 sweep_0003_baseline_fwd21_rb12_tw504_top3_n5_d3 features=baseline
+BEST sharpe=0.9259 mdd=0.1993 run=sweep_0003_baseline_fwd21_rb12_tw504_top3_n5_d3
+TRIAL 4/300 sweep_0004_baseline_fwd21_rb12_tw504_top4_n5_d3 features=baseline
+BEST sharpe=0.9572 mdd=0.1584 run=sweep_0004_baseline_fwd21_rb12_tw504_top4_n5_d3
+TRIAL 5/300 sweep_0005_baseline_fwd21_rb12_tw504_top5_n5_d3 features=baseline
+BEST sharpe=1.0117 mdd=0.1479 run=sweep_0005_baseline_fwd21_rb12_tw504_top5_n5_d3
+TRIAL 6/300 sweep_0006_baseline_fwd21_rb12_tw504_top7_n5_d3 features=baseline
+BEST sharpe=1.0277 mdd=0.1852 run=sweep_0006_baseline_fwd21_rb12_tw504_top7_n5_d3
+TRIAL 7/300 sweep_0007_baseline_fwd21_rb12_tw504_top10_n5_d3 features=baseline
+TRIAL 8/300 sweep_0008_baseline_fwd21_rb5_tw504_top1_n5_d3 features=baseline
+TRIAL 9/300 sweep_0009_baseline_fwd21_rb5_tw504_top2_n5_d3 features=baseline
+TRIAL 10/300 sweep_0010_baseline_fwd21_rb5_tw504_top3_n5_d3 features=baseline
+TRIAL 11/300 sweep_0011_baseline_fwd21_rb5_tw504_top5_n5_d3 features=baseline
+TRIAL 12/300 sweep_0012_baseline_fwd21_rb5_tw504_top7_n5_d3 features=baseline
+TRIAL 13/300 sweep_0013_baseline_fwd21_rb6_tw504_top1_n5_d3 features=baseline
+TRIAL 14/300 sweep_0014_baseline_fwd21_rb6_tw504_top2_n5_d3 features=baseline
+TRIAL 15/300 sweep_0015_baseline_fwd21_rb6_tw504_top3_n5_d3 features=baseline
+TRIAL 16/300 sweep_0016_baseline_fwd21_rb6_tw504_top5_n5_d3 features=baseline
+TRIAL 17/300 sweep_0017_baseline_fwd21_rb6_tw504_top7_n5_d3 features=baseline
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.codex_runs/stock_ml_e2e/sweep_ranker.py", line 602, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.codex_runs/stock_ml_e2e/sweep_ranker.py", line 519, in main
+    row, result, predictions, eval_summary = run_trial(
+                                             ~~~~~~~~~^
+        module,
+        ^^^^^^^
+    ...<5 lines>...
+        spec,
+        ^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.codex_runs/stock_ml_e2e/sweep_ranker.py", line 360, in run_trial
+    predictions = module.walk_forward_rank(
+        frame=dataset,
+    ...<13 lines>...
+        else None,
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 504, in walk_forward_rank
+    if not predictor.fit(train_slice, predictor_cols, target_col):
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/stock_ml_e2e.py", line 333, in fit
+    self.model.fit(train[predictor_cols], train[target_col], qid=qid)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 751, in inner_f
+    return func(**kwargs)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/sklearn.py", line 2308, in fit
+    self._Booster = train(
+                    ~~~~~^
+        params,
+        ^^^^^^^
+    ...<8 lines>...
+        callbacks=self.callbacks,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 751, in inner_f
+    return func(**kwargs)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/training.py", line 200, in train
+    bst.update(dtrain, iteration=i, fobj=obj)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/xgboost/core.py", line 2391, in update
+    _LIB.XGBoosterUpdateOneIter(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.handle, ctypes.c_int(iteration), dtrain.handle
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+KeyboardInterrupt
