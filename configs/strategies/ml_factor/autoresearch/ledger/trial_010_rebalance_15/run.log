@@ -1,0 +1,24 @@
+output_dir=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/autoresearch/ledger/trial_010_rebalance_15
+config=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/autoresearch/ledger/trial_010_rebalance_15/trial_config.yaml
+params: run_id=autoresearch_rebalance_15 fwd=12 cw=120 tw=630 rb=15 max_pos=5 threshold=0.3
+loaded raw: 202669 rows, 101 symbols
+rows                   200574
+dates                    2096
+symbols                   100
+feature_ready_rows     177774
+training_ready_rows    176574
+training rebalance 1/89: 2021-01-21
+training rebalance 25/89: 2022-07-06
+training rebalance 50/89: 2024-01-02
+training rebalance 75/89: 2025-07-09
+prediction_rows            8593.000000
+prediction_dates             88.000000
+selected_rows               134.000000
+selected_dates               49.000000
+top_mean_forward_return       0.049671
+class_accuracy                0.330967
+backtest_symbols            49
+order_dates                 47
+first_order_date    2021-01-22
+last_order_date     2026-04-01
+wrote outputs to /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/autoresearch/ledger/trial_010_rebalance_15

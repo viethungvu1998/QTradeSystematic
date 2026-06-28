@@ -1,0 +1,64 @@
+output_dir=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/autoresearch/ledger/trial_003_threshold_045
+config=/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/strategies/ml_factor/autoresearch/ledger/trial_003_threshold_045/trial_config.yaml
+params: run_id=autoresearch_threshold_045 fwd=12 cw=120 tw=630 rb=8 max_pos=5 threshold=0.45
+loaded raw: 202669 rows, 101 symbols
+rows                   200574
+dates                    2096
+symbols                   100
+feature_ready_rows     177774
+training_ready_rows    176574
+training rebalance 1/168: 2021-01-04
+training rebalance 25/168: 2021-10-13
+training rebalance 50/168: 2022-08-02
+training rebalance 75/168: 2023-05-24
+training rebalance 100/168: 2024-03-11
+training rebalance 125/168: 2024-12-24
+training rebalance 150/168: 2025-10-16
+prediction_rows            16315.000000
+prediction_dates             167.000000
+selected_rows                  0.000000
+selected_dates                 0.000000
+top_mean_forward_return             NaN
+class_accuracy                 0.326877
+backtest_symbols      0
+order_dates           0
+first_order_date    NaT
+last_order_date     NaT
+Traceback (most recent call last):
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/ml_factor_classifier.py", line 975, in <module>
+    main()
+    ~~~~^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/ml_factor_classifier.py", line 932, in main
+    portfolio, equity, returns, qts_metrics, portfolio_stats = run_portfolio(close_bt, weights_bt)
+                                                               ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/notebooks/ml_factor_classifier.py", line 650, in run_portfolio
+    portfolio = vbt.Portfolio.from_orders(
+        close=close_bt,
+    ...<6 lines>...
+        freq=pd.tseries.frequencies.to_offset(close_bt.index[1] - close_bt.index[0]),
+    )
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/portfolio/base.py", line 2883, in from_orders
+    prep_result = preparer.result
+                  ^^^^^^^^^^^^^^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/functools.py", line 1026, in __get__
+    val = self.func(instance)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/portfolio/preparing.py", line 561, in result
+    return PFPrepResult(target_func=self.target_func, target_args=self.target_args, pf_args=self.pf_args)
+                                                                  ^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/functools.py", line 1026, in __get__
+    val = self.func(instance)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/base/preparing.py", line 614, in target_args
+    if arg_attr is not None and hasattr(self, arg_attr):
+                                ~~~~~~~^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/miniconda3/lib/python3.13/functools.py", line 1026, in __get__
+    val = self.func(instance)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/portfolio/preparing.py", line 838, in max_order_records
+    max_order_records = int(np.max(np.sum(~np.isnan(_size), axis=0)))
+                            ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py", line 3164, in max
+    return _wrapreduction(a, np.maximum, 'max', axis, None, out,
+                          keepdims=keepdims, initial=initial, where=where)
+  File "/Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py", line 86, in _wrapreduction
+    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: zero-size array to reduction operation maximum which has no identity

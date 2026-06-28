@@ -1,0 +1,55 @@
+run_id: autoresearch_threshold_040
+default_params_path: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/notebooks/stock_ml_e2e_classification/default_params.yaml
+model_weights_path: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/model_weights/stock_ml_e2e_classification/vn_reference_xgb_classifier_baseline_top5_fwd12_rb8_sma42
+run:
+  forward_period: 12
+  classification_window: 120
+  train_window: 630
+  rebalance_frequency: 8
+  max_positions: 5
+features:
+  selected_groups:
+  - baseline
+  predictor_cols:
+  - close_macd_histogram_50_200_30
+  - close_qsmom_21_252_126
+  - close_roc_0_63
+  - close_roc_0_252
+  - close_rsi_63
+  - close_fip_momentum_252
+  - close_volatility_annualized_252
+classification:
+  class_quantiles:
+  - 0.15
+  - 0.45
+  - 0.6
+  - 0.85
+  class_scores:
+  - -2.0
+  - -1.0
+  - 0.0
+  - 1.0
+  - 2.0
+signal:
+  probability_cols:
+  - class_3_prob
+  - class_4_prob
+  probability_sum_col: class_3_4_prob
+  probability_threshold: 0.4
+  min_probability_threshold: null
+  fallback_min_positions: 0
+  rank_col: class_4_prob
+xgb:
+  n_estimators: 5
+  learning_rate: 0.1
+  max_depth: 3
+  n_jobs: -1
+  random_state: 123
+  objective: multi:softprob
+  eval_metric: mlogloss
+  tree_method: hist
+benchmark_regime:
+  enabled: true
+  rule: above_sma
+  window: 42
+  min_periods: 14
