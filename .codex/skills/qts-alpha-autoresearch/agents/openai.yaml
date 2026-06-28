@@ -1,0 +1,4 @@
+interface:
+  display_name: "QTS Alpha Autoresearch"
+  short_description: "Autonomous alpha research loops"
+  default_prompt: "Use $qts-alpha-autoresearch to set up and run a bounded QTS strategy autoresearch loop."
