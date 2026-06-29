@@ -1,0 +1,17 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/047_threshold_40_strict_class3_stop_loss15",
+  "finished_at": "2026-06-28T13:21:32+00:00",
+  "metric_source": "metrics.json",
+  "metrics": {
+    "cagr": 0.2520683239377932,
+    "max_drawdown": 0.39418746815098293,
+    "sharpe": 1.1070438181880986,
+    "sortino": 1.174936465568816,
+    "win_rate": 0.35877862595419846
+  },
+  "returncode": 0,
+  "run_id": "047_threshold_40_strict_class3_stop_loss15",
+  "timed_out": false,
+  "trial": 47,
+  "wall_seconds": 28.683320445008576
+}

@@ -18,9 +18,24 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pyfolio as pf
-import vectorbtpro as vbt
+import plotly.graph_objects as go
 import xgboost as xgb
 import yaml
+
+_PLOTLY_TEMPLATE = go.layout.Template
+
+
+class _PlotlyTemplateSkipInvalid(_PLOTLY_TEMPLATE):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("skip_invalid", True)
+        super().__init__(*args, **kwargs)
+
+
+go.layout.Template = _PlotlyTemplateSkipInvalid
+try:
+    import vectorbtpro as vbt
+finally:
+    go.layout.Template = _PLOTLY_TEMPLATE
 
 
 OHLCV_COLUMNS = ["date", "symbol", "open", "high", "low", "close", "volume"]
@@ -41,7 +56,7 @@ def parse_args(repo_root: Path) -> argparse.Namespace:
     default_config = (
         repo_root / "configs" / "strategies" / "ml_factor" / "vn100_ml_classification2.yaml"
     )
-    default_data_csv = repo_root / ".qts_notebook_runtime" / "vn100" / "data.csv"
+    default_data_csv = repo_root / "data" /  "VNSTOCK.csv"
     default_database = Path.home() / ".qts" / "database" / "qts.duckdb"
 
     parser = argparse.ArgumentParser(
@@ -79,6 +94,7 @@ def load_config(config_path: Path, repo_root: Path) -> None:
     global CLASS_PROB_COLS
     global CLASS_QUANTILES
     global CLASS_SCORES
+    global CLASSIFICATION_THRESHOLD_SCOPE
     global CLASSIFICATION_WINDOW
     global CONFIG_EFFECTIVE
     global CONFIG_PATH
@@ -89,18 +105,30 @@ def load_config(config_path: Path, repo_root: Path) -> None:
     global INIT_CASH
     global MAX_POSITIONS
     global MIN_FEATURE_COUNT
+    global MIN_PREDICTED_CLASS
+    global BALANCED_SAMPLE_WEIGHT
     global PREDICTOR_COLS
     global RANK_COL
+    global REBALANCE_EXISTING_POSITIONS
     global REBALANCE_FREQUENCY
     global RUN_ID
     global SIGNAL_PROB_COLS
     global SIGNAL_PROB_SUM_COL
     global SIGNAL_THRESHOLD
     global START_DATE
+    global STOP_LOSS
+    global STOP_LOSS_BENCHMARK_FILTER
+    global STOP_LOSS_MIN_HOLD
     global TARGET_COL
+    global TAKE_PROFIT
     global TEST_INTERVALS
     global TRAIN_WINDOW
+    global TRAILING_STOP
     global XGB_PARAMS
+    global BENCHMARK_REGIME_ENABLED
+    global BENCHMARK_REGIME_MIN_PERIODS
+    global BENCHMARK_REGIME_RULE
+    global BENCHMARK_REGIME_WINDOW
 
     def resolve(path: Path) -> Path:
         return path if path.is_absolute() else repo_root / path
@@ -146,6 +174,9 @@ def load_config(config_path: Path, repo_root: Path) -> None:
     classification = payload.get("classification", {})
     signal = payload.get("signal", {})
     commission = payload.get("commission", {})
+    exit_rules = payload.get("backtest", {}).get("exit_rules", {})
+    backtest = payload.get("backtest", {})
+    benchmark_regime = payload.get("benchmark_regime", {})
     portfolio_params = payload.get("portfolio_construction", {}).get("params", {})
     validation = payload.get("validation", {})
 
@@ -163,6 +194,7 @@ def load_config(config_path: Path, repo_root: Path) -> None:
     CLASSIFICATION_WINDOW = int(run["classification_window"])
     TRAIN_WINDOW = int(run["train_window"])
     REBALANCE_FREQUENCY = int(run["rebalance_frequency"])
+    REBALANCE_EXISTING_POSITIONS = bool(backtest.get("rebalance_existing_positions", False))
     MAX_POSITIONS = int(run["max_positions"])
     MIN_FEATURE_COUNT = int(run["min_feature_count"])
     portfolio_positions = portfolio_params.get("num_long_positions")
@@ -190,6 +222,14 @@ def load_config(config_path: Path, repo_root: Path) -> None:
     if len(CLASS_QUANTILES) != len(CLASS_SCORES) - 1:
         raise ValueError("classification.class_quantiles must have len(class_scores) - 1 entries.")
     CLASS_PROB_COLS = [f"class_{idx}_prob" for idx in range(len(CLASS_SCORES))]
+    CLASSIFICATION_THRESHOLD_SCOPE = str(
+        classification.get("threshold_scope", "classification_window")
+    )
+    if CLASSIFICATION_THRESHOLD_SCOPE not in {"classification_window", "train"}:
+        raise ValueError(
+            "classification.threshold_scope must be 'classification_window' or 'train'."
+        )
+    BALANCED_SAMPLE_WEIGHT = bool(classification.get("balanced_sample_weight", False))
 
     SIGNAL_PROB_COLS = [str(value) for value in signal["probability_cols"]]
     SIGNAL_PROB_SUM_COL = str(signal["probability_sum_col"])
@@ -198,7 +238,33 @@ def load_config(config_path: Path, repo_root: Path) -> None:
         threshold = signal["probability_threshold"]
     SIGNAL_THRESHOLD = None if threshold is None else float(threshold)
     FALLBACK_MIN_POSITIONS = int(signal["fallback_min_positions"])
+    min_predicted_class = signal.get("min_predicted_class")
+    MIN_PREDICTED_CLASS = None if min_predicted_class is None else int(min_predicted_class)
+    if MIN_PREDICTED_CLASS is not None and not 0 <= MIN_PREDICTED_CLASS < len(CLASS_SCORES):
+        raise ValueError("signal.min_predicted_class must be a valid class index.")
     RANK_COL = str(signal["rank_col"])
+    STOP_LOSS = None if exit_rules.get("stop_loss") is None else float(exit_rules["stop_loss"])
+    STOP_LOSS_MIN_HOLD = int(exit_rules.get("stop_loss_min_hold", 1))
+    if STOP_LOSS_MIN_HOLD < 1:
+        raise ValueError("backtest.exit_rules.stop_loss_min_hold must be >= 1.")
+    stop_loss_benchmark_filter = exit_rules.get("stop_loss_benchmark_filter")
+    STOP_LOSS_BENCHMARK_FILTER = (
+        None if stop_loss_benchmark_filter is None else str(stop_loss_benchmark_filter)
+    )
+    if STOP_LOSS_BENCHMARK_FILTER not in {None, "below_sma"}:
+        raise ValueError("backtest.exit_rules.stop_loss_benchmark_filter must be 'below_sma'.")
+    TAKE_PROFIT = None if exit_rules.get("take_profit") is None else float(
+        exit_rules["take_profit"]
+    )
+    TRAILING_STOP = None if exit_rules.get("trailing_stop") is None else float(
+        exit_rules["trailing_stop"]
+    )
+    BENCHMARK_REGIME_ENABLED = bool(benchmark_regime.get("enabled", False))
+    BENCHMARK_REGIME_RULE = str(benchmark_regime.get("rule", "above_sma"))
+    BENCHMARK_REGIME_WINDOW = int(benchmark_regime.get("window", 42))
+    BENCHMARK_REGIME_MIN_PERIODS = int(benchmark_regime.get("min_periods", 14))
+    if BENCHMARK_REGIME_RULE != "above_sma":
+        raise ValueError("benchmark_regime.rule must be 'above_sma'.")
 
     XGB_PARAMS = dict(payload["xgb"])
 
@@ -211,6 +277,41 @@ def load_config(config_path: Path, repo_root: Path) -> None:
             start, end = item
         TEST_INTERVALS.append((pd.Timestamp(start), pd.Timestamp(end)))
     TARGET_COL = f"Return_fwd_{FORWARD_PERIOD}"
+
+
+def write_prediction_diagnostics(output_dir: Path, predictions: pd.DataFrame) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    predictions.to_csv(output_dir / "predictions.csv", index=False)
+
+    diagnostics = {
+        "prediction_rows": len(predictions),
+        "prediction_dates": predictions["date"].nunique(),
+        "signal_threshold": SIGNAL_THRESHOLD,
+        "min_predicted_class": MIN_PREDICTED_CLASS,
+        "classification_threshold_scope": CLASSIFICATION_THRESHOLD_SCOPE,
+        "balanced_sample_weight": BALANCED_SAMPLE_WEIGHT,
+        "max_signal_probability": predictions[SIGNAL_PROB_SUM_COL].max(),
+        "rows_above_signal_threshold": int(
+            (predictions[SIGNAL_PROB_SUM_COL] > SIGNAL_THRESHOLD).sum()
+        ),
+    }
+    if MIN_PREDICTED_CLASS is not None:
+        predicted_class_filter = predictions["predicted_class"] >= MIN_PREDICTED_CLASS
+        diagnostics["rows_at_min_predicted_class"] = int(predicted_class_filter.sum())
+        diagnostics["rows_passing_entry_filters"] = int(
+            (
+                predicted_class_filter
+                & (predictions[SIGNAL_PROB_SUM_COL] > SIGNAL_THRESHOLD)
+            ).sum()
+        )
+    for class_idx in range(len(CLASS_SCORES)):
+        diagnostics[f"predicted_class_{class_idx}_rows"] = int(
+            (predictions["predicted_class"] == class_idx).sum()
+        )
+
+    pd.Series(diagnostics, name="prediction_diagnostics").to_csv(
+        output_dir / "prediction_diagnostics.csv"
+    )
 
 
 def default_output_dir(repo_root: Path) -> Path:
@@ -283,7 +384,7 @@ def load_or_build_raw(
 
 def build_features(raw: pl.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     asset_raw = raw.filter(pl.col("symbol") != BENCHMARK)
-    raw_prices = asset_raw.select(["date", "symbol", "close"]).to_pandas()
+    raw_prices = raw.select(["date", "symbol", "high", "low", "close"]).to_pandas()
     raw_prices["date"] = pd.to_datetime(raw_prices["date"])
     raw_prices = raw_prices.drop_duplicates(["symbol", "date"], keep="last").sort_values(
         ["symbol", "date"]
@@ -441,6 +542,7 @@ def build_features(raw: pl.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Se
 
 def run_predictions(
     model_frame: pd.DataFrame,
+    diagnostic_output_dir: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series]:
     all_dates = pd.DatetimeIndex(model_frame["date"].drop_duplicates()).sort_values()
     rebalance_dates = all_dates[::REBALANCE_FREQUENCY]
@@ -483,14 +585,22 @@ def run_predictions(
         if len(train) == 0 or len(threshold_frame) == 0 or len(predict) == 0:
             continue
 
-        thresholds = np.quantile(threshold_frame[TARGET_COL], CLASS_QUANTILES)
+        threshold_source = train if CLASSIFICATION_THRESHOLD_SCOPE == "train" else threshold_frame
+        thresholds = np.quantile(threshold_source[TARGET_COL], CLASS_QUANTILES)
         train_labels = np.searchsorted(thresholds, train[TARGET_COL], side="left")
         classes = np.array(sorted(np.unique(train_labels)), dtype=int)
         if len(classes) < 2:
             continue
 
+        model_labels = np.searchsorted(classes, train_labels)
+        fit_kwargs = {}
+        if BALANCED_SAMPLE_WEIGHT:
+            class_counts = np.bincount(model_labels, minlength=len(classes))
+            sample_weight = 1.0 / class_counts[model_labels]
+            fit_kwargs["sample_weight"] = sample_weight / sample_weight.mean()
+
         model = xgb.XGBClassifier(**XGB_PARAMS, num_class=len(classes))
-        model.fit(train[PREDICTOR_COLS], np.searchsorted(classes, train_labels))
+        model.fit(train[PREDICTOR_COLS], model_labels, **fit_kwargs)
         raw_probabilities = model.predict_proba(predict[PREDICTOR_COLS])
 
         probabilities = np.zeros((len(predict), len(CLASS_SCORES)))
@@ -518,6 +628,7 @@ def run_predictions(
         for col_idx, col_name in enumerate(CLASS_PROB_COLS):
             out[col_name] = probabilities[:, col_idx]
         out[SIGNAL_PROB_SUM_COL] = out[SIGNAL_PROB_COLS].sum(axis=1)
+        out["score_prob"] = out["score"] * out[SIGNAL_PROB_SUM_COL]
         prediction_rows.append(out)
 
     if not prediction_rows:
@@ -531,6 +642,8 @@ def run_predictions(
 
     def select_cross_section(cross_section: pd.DataFrame) -> pd.DataFrame:
         selected = cross_section[cross_section[SIGNAL_PROB_SUM_COL] > SIGNAL_THRESHOLD].copy()
+        if MIN_PREDICTED_CLASS is not None:
+            selected = selected[selected["predicted_class"] >= MIN_PREDICTED_CLASS].copy()
         if len(selected) < FALLBACK_MIN_POSITIONS:
             fallback = (
                 cross_section[~cross_section["symbol"].isin(selected["symbol"])]
@@ -551,6 +664,15 @@ def run_predictions(
         ],
         ignore_index=True,
     )
+    if selected_predictions.empty:
+        if diagnostic_output_dir is not None:
+            write_prediction_diagnostics(diagnostic_output_dir, predictions)
+        raise RuntimeError(
+            "No predictions passed signal filters: "
+            f"{SIGNAL_PROB_SUM_COL}>{SIGNAL_THRESHOLD}, "
+            f"min_predicted_class={MIN_PREDICTED_CLASS}, "
+            f"fallback_min_positions={FALLBACK_MIN_POSITIONS}."
+        )
 
     scored_predictions = predictions[predictions["realized_forward_return"].notna()].copy()
     selected_eval = pd.concat(
@@ -583,21 +705,32 @@ def build_orders(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame]:
     close = raw_prices.pivot(index="date", columns="symbol", values="close").sort_index()
     close = close.sort_index(axis=1)
+    high = raw_prices.pivot(index="date", columns="symbol", values="high").sort_index()
+    high = high.reindex(index=close.index, columns=close.columns)
+    low = raw_prices.pivot(index="date", columns="symbol", values="low").sort_index()
+    low = low.reindex(index=close.index, columns=close.columns)
     target_weights = pd.DataFrame(np.nan, index=close.index, columns=close.columns)
     next_session = dict(zip(close.index[:-1], close.index[1:], strict=False))
     previous_symbols: set[str] = set()
+    regime_allowed = benchmark_regime_allowed(close)
 
     for prediction_date, selected in selected_predictions.groupby("date", sort=True):
         execution_date = next_session.get(pd.Timestamp(prediction_date))
         if execution_date is None:
             continue
 
-        current_symbols = set(selected["symbol"])
-        target_weights.loc[execution_date, sorted(previous_symbols - current_symbols)] = 0.0
-        target_weights.loc[execution_date, sorted(current_symbols - previous_symbols)] = (
-            1 / MAX_POSITIONS
+        current_symbols = (
+            set(selected["symbol"])
+            if regime_allowed is None or bool(regime_allowed.get(pd.Timestamp(prediction_date), False))
+            else set()
         )
+        target_weights.loc[execution_date, sorted(previous_symbols - current_symbols)] = 0.0
+        entry_symbols = current_symbols if REBALANCE_EXISTING_POSITIONS else current_symbols - previous_symbols
+        target_weights.loc[execution_date, sorted(entry_symbols)] = 1 / MAX_POSITIONS
         previous_symbols = current_symbols
+
+    if STOP_LOSS is not None or TAKE_PROFIT is not None or TRAILING_STOP is not None:
+        target_weights = apply_exit_rules(close, target_weights, high, low)
 
     used_symbols = target_weights.notna().any(axis=0)
     close_bt = close.loc[:, used_symbols]
@@ -636,6 +769,7 @@ def build_orders(
             "predicted_class",
             "realized_class",
             "score",
+            "score_prob",
             *CLASS_PROB_COLS,
             SIGNAL_PROB_SUM_COL,
         ]
@@ -644,8 +778,96 @@ def build_orders(
     return close_bt, weights_bt, orders, orders_summary, order_realized
 
 
+def benchmark_regime_allowed(close: pd.DataFrame) -> pd.Series | None:
+    if not BENCHMARK_REGIME_ENABLED:
+        return None
+    return benchmark_above_sma(close)
+
+
+def benchmark_above_sma(close: pd.DataFrame) -> pd.Series:
+    if BENCHMARK not in close.columns:
+        raise ValueError(f"{BENCHMARK} is required for benchmark_regime.")
+    benchmark_close = close[BENCHMARK]
+    benchmark_sma = benchmark_close.rolling(
+        BENCHMARK_REGIME_WINDOW,
+        min_periods=BENCHMARK_REGIME_MIN_PERIODS,
+    ).mean()
+    return (benchmark_close > benchmark_sma).fillna(False)
+
+
+def apply_exit_rules(
+    close: pd.DataFrame,
+    target_weights: pd.DataFrame,
+    high: pd.DataFrame,
+    low: pd.DataFrame,
+) -> pd.DataFrame:
+    adjusted = target_weights.copy()
+    active_entries: dict[str, tuple[float, int, float]] = {}
+    dates = list(close.index)
+    stop_loss_allowed = None
+    if STOP_LOSS_BENCHMARK_FILTER == "below_sma":
+        stop_loss_allowed = ~benchmark_above_sma(close)
+
+    for idx, date in enumerate(dates):
+        orders = adjusted.loc[date].dropna()
+        for symbol, target_weight in orders.items():
+            if target_weight > 0:
+                price = close.at[date, symbol]
+                if pd.notna(price) and symbol not in active_entries:
+                    active_entries[str(symbol)] = (float(price), idx, float(price))
+            else:
+                active_entries.pop(str(symbol), None)
+
+        if idx + 1 >= len(dates):
+            continue
+
+        exit_symbols: list[str] = []
+        entry_updates: dict[str, tuple[float, int, float]] = {}
+        for symbol, (entry_price, entry_idx, peak_price) in active_entries.items():
+            if idx <= entry_idx:
+                continue
+            close_price = close.at[date, symbol]
+            if pd.isna(close_price) or entry_price <= 0:
+                continue
+            stop_price = close_price
+            take_price = close_price
+            current_peak = max(peak_price, float(take_price))
+            holding_days = idx - entry_idx
+            benchmark_filter_passed = (
+                stop_loss_allowed is None or bool(stop_loss_allowed.get(date, False))
+            )
+            stop_hit = (
+                STOP_LOSS is not None
+                and holding_days >= STOP_LOSS_MIN_HOLD
+                and benchmark_filter_passed
+                and float(stop_price) / entry_price - 1 <= -STOP_LOSS
+            )
+            take_hit = TAKE_PROFIT is not None and float(take_price) / entry_price - 1 >= TAKE_PROFIT
+            trail_hit = (
+                TRAILING_STOP is not None
+                and float(stop_price) / current_peak - 1 <= -TRAILING_STOP
+            )
+            if stop_hit or take_hit or trail_hit:
+                adjusted.loc[dates[idx + 1], symbol] = 0.0
+                exit_symbols.append(symbol)
+            else:
+                entry_updates[symbol] = (entry_price, entry_idx, current_peak)
+
+        for symbol in exit_symbols:
+            active_entries.pop(symbol, None)
+        active_entries.update(entry_updates)
+
+    return adjusted
+
+
+def order_win_rate(order_realized: pd.DataFrame) -> float:
+    if order_realized.empty:
+        return float("nan")
+    return float((order_realized["realized_forward_return"] > 0).sum() / len(order_realized))
+
+
 def run_portfolio(
-    close_bt: pd.DataFrame, weights_bt: pd.DataFrame
+    close_bt: pd.DataFrame, weights_bt: pd.DataFrame, order_realized: pd.DataFrame
 ) -> tuple[vbt.Portfolio, pd.Series, pd.Series, pd.Series, pd.Series]:
     portfolio = vbt.Portfolio.from_orders(
         close=close_bt,
@@ -673,7 +895,7 @@ def run_portfolio(
             "sortino": np.mean(returns_list) / downside_std * np.sqrt(252),
             "cagr": (equity_list[-1] / equity_list[0]) ** (252 / (len(equity_list) - 1)) - 1,
             "max_drawdown": abs(np.min((np.array(equity_list) - running_peak) / running_peak)),
-            "win_rate": np.mean(np.array(returns_list) > 0),
+            "win_rate": order_win_rate(order_realized),
         },
         name="qts_metrics",
     )
@@ -821,9 +1043,22 @@ def save_outputs(
             "forward_period": FORWARD_PERIOD,
             "train_window": TRAIN_WINDOW,
             "classification_window": CLASSIFICATION_WINDOW,
+            "classification_threshold_scope": CLASSIFICATION_THRESHOLD_SCOPE,
+            "balanced_sample_weight": BALANCED_SAMPLE_WEIGHT,
             "rebalance_frequency": REBALANCE_FREQUENCY,
+            "rebalance_existing_positions": REBALANCE_EXISTING_POSITIONS,
             "max_positions": MAX_POSITIONS,
             "signal_threshold": SIGNAL_THRESHOLD,
+            "min_predicted_class": MIN_PREDICTED_CLASS,
+            "stop_loss": STOP_LOSS,
+            "stop_loss_min_hold": STOP_LOSS_MIN_HOLD,
+            "stop_loss_benchmark_filter": STOP_LOSS_BENCHMARK_FILTER,
+            "take_profit": TAKE_PROFIT,
+            "trailing_stop": TRAILING_STOP,
+            "benchmark_regime_enabled": BENCHMARK_REGIME_ENABLED,
+            "benchmark_regime_rule": BENCHMARK_REGIME_RULE,
+            "benchmark_regime_window": BENCHMARK_REGIME_WINDOW,
+            "benchmark_regime_min_periods": BENCHMARK_REGIME_MIN_PERIODS,
             "raw_rows": raw.height,
             "raw_symbols": raw.select(pl.col("symbol").n_unique()).item(),
             "asset_symbols": raw.filter(pl.col("symbol") != BENCHMARK)
@@ -898,10 +1133,20 @@ def main() -> None:
         f"run_id={RUN_ID}",
         f"fwd={FORWARD_PERIOD}",
         f"cw={CLASSIFICATION_WINDOW}",
+        f"threshold_scope={CLASSIFICATION_THRESHOLD_SCOPE}",
+        f"balanced_sample_weight={BALANCED_SAMPLE_WEIGHT}",
         f"tw={TRAIN_WINDOW}",
         f"rb={REBALANCE_FREQUENCY}",
+        f"rebalance_existing_positions={REBALANCE_EXISTING_POSITIONS}",
         f"max_pos={MAX_POSITIONS}",
         f"threshold={SIGNAL_THRESHOLD}",
+        f"min_predicted_class={MIN_PREDICTED_CLASS}",
+        f"stop_loss={STOP_LOSS}",
+        f"stop_loss_min_hold={STOP_LOSS_MIN_HOLD}",
+        f"stop_loss_benchmark_filter={STOP_LOSS_BENCHMARK_FILTER}",
+        f"take_profit={TAKE_PROFIT}",
+        f"trailing_stop={TRAILING_STOP}",
+        f"benchmark_regime_enabled={BENCHMARK_REGIME_ENABLED}",
     )
     raw = load_or_build_raw(
         repo_root,
@@ -920,7 +1165,10 @@ def main() -> None:
     model_frame, raw_prices, dataset_summary = build_features(raw)
     print(dataset_summary.to_string())
 
-    predictions, selected_predictions, selected_eval, run_eval = run_predictions(model_frame)
+    predictions, selected_predictions, selected_eval, run_eval = run_predictions(
+        model_frame,
+        args.output_dir,
+    )
     print(run_eval.to_string())
 
     close_bt, weights_bt, orders, orders_summary, order_realized = build_orders(
@@ -929,7 +1177,11 @@ def main() -> None:
     )
     print(orders_summary.to_string())
 
-    portfolio, equity, returns, qts_metrics, portfolio_stats = run_portfolio(close_bt, weights_bt)
+    portfolio, equity, returns, qts_metrics, portfolio_stats = run_portfolio(
+        close_bt,
+        weights_bt,
+        order_realized,
+    )
     benchmark_returns = benchmark_returns_from_raw(raw)
     pyfolio_returns, benchmark_returns = align_pyfolio_returns(returns, benchmark_returns)
     pyfolio_stats = pf.timeseries.perf_stats(

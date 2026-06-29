@@ -1,0 +1,17 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/081_threshold50_config2_clearclass_fallback3_sl15",
+  "finished_at": "2026-06-28T14:32:09+00:00",
+  "metric_source": "metrics.json",
+  "metrics": {
+    "cagr": 0.12806302308978101,
+    "max_drawdown": 0.32011038832828254,
+    "sharpe": 0.8353907856606121,
+    "sortino": 0.949659096528657,
+    "win_rate": 0.5416666666666666
+  },
+  "returncode": 0,
+  "run_id": "081_threshold50_config2_clearclass_fallback3_sl15",
+  "timed_out": false,
+  "trial": 81,
+  "wall_seconds": 18.805118835996836
+}

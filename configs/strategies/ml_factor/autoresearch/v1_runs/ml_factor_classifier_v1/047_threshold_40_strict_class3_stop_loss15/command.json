@@ -1,0 +1,22 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/vn100_ml_classification2.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/047_threshold_40_strict_class3_stop_loss15",
+    "--run-name=047_threshold_40_strict_class3_stop_loss15",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet",
+    "--rank-col=score",
+    "--probability-threshold=0.40",
+    "--min-predicted-class=3",
+    "--fallback-min-positions=0",
+    "--classification-threshold-scope=train",
+    "--balanced-sample-weight",
+    "--max-positions=6",
+    "--stop-loss=0.15"
+  ],
+  "run_id": "047_threshold_40_strict_class3_stop_loss15",
+  "started_at": "2026-06-28T13:21:03+00:00",
+  "trial": 47
+}

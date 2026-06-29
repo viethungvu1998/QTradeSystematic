@@ -1,0 +1,30 @@
+{
+  "output_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/160_098base_rank_scoreprob_max4_sl05_close_trigger",
+  "files": [
+    "command.json",
+    "cumulative_returns.png",
+    "dataset_summary.csv",
+    "drawdown.png",
+    "effective_config.yaml",
+    "equity_curve.png",
+    "manifest.json",
+    "model_frame.csv",
+    "orders.csv",
+    "orders_realized.csv",
+    "orders_summary.csv",
+    "params.csv",
+    "portfolio.csv",
+    "portfolio_stats.csv",
+    "predictions.csv",
+    "pyfolio_aligned_returns.csv",
+    "pyfolio_stats.csv",
+    "qts_metrics.csv",
+    "run.log",
+    "run_eval.csv",
+    "selected_predictions.csv",
+    "selected_realized_results.csv",
+    "target_weights.csv",
+    "trial_config.yaml",
+    "vectorbt_orders.csv"
+  ]
+}

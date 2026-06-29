@@ -1,0 +1,17 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/076_threshold_38_fallback3_max6_scores_mild_stop_loss15",
+  "finished_at": "2026-06-28T14:00:04+00:00",
+  "metric_source": "metrics.json",
+  "metrics": {
+    "cagr": 0.30730851680066595,
+    "max_drawdown": 0.19637422466027743,
+    "sharpe": 1.6965930190292384,
+    "sortino": 1.9343816855624738,
+    "win_rate": 0.36593511450381677
+  },
+  "returncode": 0,
+  "run_id": "076_threshold_38_fallback3_max6_scores_mild_stop_loss15",
+  "timed_out": false,
+  "trial": 76,
+  "wall_seconds": 12.06937082996592
+}

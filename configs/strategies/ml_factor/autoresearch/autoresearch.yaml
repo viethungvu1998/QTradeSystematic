@@ -1,183 +1,97 @@
 version: 1
+run_tag: ml_factor_classifier_v1
+strategy: ml_factor
 algorithm: ml_factor_classifier
 description: >
   VN100 ML factor classifier autoresearch. The fixed command target is
   notebooks/ml_factor_classifier.py via a thin trial wrapper that writes
   per-trial YAML configs and metrics.json.
 
-command:
-  module: configs/strategies/ml_factor/autoresearch/run_classifier_trial.py
-  base_args:
-    - --config=configs/strategies/ml_factor/vn100_ml_classification2.yaml
-    - --skip-tearsheet
-
-paths:
-  ledger: configs/strategies/ml_factor/autoresearch/ledger
-  allowed_edit_roots:
-    - configs/strategies/ml_factor/
-
 quota:
-  max_trials: 80
+  max_trials: 220
+
+objective:
+  metric: sharpe
+  direction: maximize
+  min_delta: 0.0
 
 criteria:
-  sharpe_ge: 1.4
-  max_drawdown_le: 0.25
+  mode: all
+  targets:
+    - metric: sharpe
+      op: ">="
+      value: 1.7
+    - metric: max_drawdown
+      op: "<="
+      value: 0.25
+
+paths:
+  artifact_root: configs/strategies/ml_factor/autoresearch/v1_ledger
+  run_root: configs/strategies/ml_factor/autoresearch/v1_runs
+  allowed_edit_roots:
+    - configs/strategies/ml_factor/
+    - notebooks/ml_factor_classifier.py
+
+command:
+  argv:
+    - .venv/bin/python
+    - configs/strategies/ml_factor/autoresearch/run_classifier_trial.py
+    - --config=configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/098_threshold45_scores_top3_quantiles5575_xgb10_max3/trial_config.yaml
+    - --output-dir={run_dir}
+    - --run-name={run_id}
+    - --data-csv=data/VNSTOCK.csv
+    - --skip-tearsheet
+    - --rank-col=class_3_4_prob
+    - --probability-threshold=0.45
+    - --clear-min-predicted-class
+    - --forward-period=12
+    - --classification-window=120
+    - --fallback-min-positions=3
+    - --max-positions=4
+    - --rebalance-frequency=8
+    - --stop-loss=0.05
+    - --disable-benchmark-regime
+    - --class-quantiles=0.15,0.35,0.55,0.70
+    - --class-scores=-2,-1,0,1,3
+    - --xgb-n-estimators=10
+    - --xgb-max-depth=3
 
 research_limits:
   allowed_actions:
-    - tune_hyperparams
-    - change_rebalance_period
-    - change_portfolio_params
-    - change_signal_threshold
-    - change_classification_bins
+    - id: tune_hyperparams
+      aliases:
+        - change_rebalance_period
+        - change_signal_threshold
+        - change_classification_bins
+    - id: change_portfolio_params
+    - id: stop_take_profit_rule
+      aliases:
+        - sl_tp
+        - stop_loss_take_profit
 
-first_experiments:
-  - name: threshold_035
-    action: change_signal_threshold
-    args:
-      - --probability-threshold=0.35
-
-  - name: threshold_040
-    action: change_signal_threshold
-    args:
-      - --probability-threshold=0.40
-
-  - name: threshold_045
-    action: change_signal_threshold
-    args:
-      - --probability-threshold=0.45
-
-  - name: threshold_050
-    action: change_signal_threshold
-    args:
-      - --probability-threshold=0.50
-
-  - name: max_positions_3
-    action: change_portfolio_params
-    args:
-      - --max-positions=3
-
-  - name: max_positions_4
-    action: change_portfolio_params
-    args:
-      - --max-positions=4
-
-  - name: max_positions_6
-    action: change_portfolio_params
-    args:
-      - --max-positions=6
-
-  - name: rebalance_5
-    action: change_rebalance_period
-    args:
-      - --rebalance-frequency=5
-
-  - name: rebalance_10
-    action: change_rebalance_period
-    args:
-      - --rebalance-frequency=10
-
-  - name: rebalance_15
-    action: change_rebalance_period
-    args:
-      - --rebalance-frequency=15
-
-  - name: forward_10
-    action: tune_hyperparams
-    args:
-      - --forward-period=10
-
-  - name: forward_15
-    action: tune_hyperparams
-    args:
-      - --forward-period=15
-
-  - name: forward_21
-    action: tune_hyperparams
-    args:
-      - --forward-period=21
-
-  - name: train_504
-    action: tune_hyperparams
-    args:
-      - --train-window=504
-
-  - name: train_756
-    action: tune_hyperparams
-    args:
-      - --train-window=756
-
-  - name: class_window_252
-    action: tune_hyperparams
-    args:
-      - --classification-window=252
-
-  - name: rank_score
-    action: change_signal_threshold
-    args:
-      - --rank-col=score
-
-  - name: rank_class_34_sum
-    action: change_signal_threshold
-    args:
-      - --rank-col=class_3_4_prob
-
-  - name: fallback_1
-    action: change_portfolio_params
-    args:
-      - --fallback-min-positions=1
-
-  - name: xgb_20_depth3
-    action: tune_hyperparams
-    args:
-      - --xgb-n-estimators=20
-      - --xgb-max-depth=3
-
-  - name: xgb_50_depth2
-    action: tune_hyperparams
-    args:
-      - --xgb-n-estimators=50
-      - --xgb-max-depth=2
-
-  - name: xgb_30_depth4
-    action: tune_hyperparams
-    args:
-      - --xgb-n-estimators=30
-      - --xgb-max-depth=4
-
-  - name: xgb_lr_005
-    action: tune_hyperparams
-    args:
-      - --xgb-learning-rate=0.05
-
-  - name: xgb_subsample_08
-    action: tune_hyperparams
-    args:
-      - --xgb-subsample=0.80
-      - --xgb-colsample-bytree=0.80
-
-  - name: xgb_min_child_3
-    action: tune_hyperparams
-    args:
-      - --xgb-min-child-weight=3
-
-  - name: xgb_reg_1
-    action: tune_hyperparams
-    args:
-      - --xgb-reg-lambda=2.0
-      - --xgb-reg-alpha=0.1
-
-  - name: quantiles_even
-    action: change_classification_bins
-    args:
-      - --class-quantiles=0.20,0.40,0.60,0.80
-
-  - name: quantiles_tail
-    action: change_classification_bins
-    args:
-      - --class-quantiles=0.10,0.35,0.65,0.90
-
-  - name: scores_top_heavy
-    action: change_classification_bins
-    args:
-      - --class-scores=-1.0,-0.5,0.0,1.0,3.0
+next_step_policy:
+  diagnostics:
+    bad_max_drawdown_above: 0.25
+    bad_win_rate_below: 0.5
+  first_experiments:
+    - id: rank_score_max_positions_6
+      idea_family: change_portfolio_params
+      change: run rank_col=score with max_positions=6
+    - id: rank_score_rebalance_5
+      idea_family: tune_hyperparams
+      change: run rank_col=score with rebalance_frequency=5
+    - id: rank_score_rebalance_10
+      idea_family: tune_hyperparams
+      change: run rank_col=score with rebalance_frequency=10
+    - id: rank_score_forward_10
+      idea_family: tune_hyperparams
+      change: run rank_col=score with forward_period=10
+    - id: rank_score_xgb_20_depth3
+      idea_family: tune_hyperparams
+      change: run rank_col=score with xgb n_estimators=20 max_depth=3
+    - id: rank_score_quantiles_tail
+      idea_family: tune_hyperparams
+      change: run rank_col=score with tail classification quantiles
+    - id: sl_tp_overlay
+      idea_family: stop_take_profit_rule
+      change: add and test stop-loss/take-profit overlay in the backtest module

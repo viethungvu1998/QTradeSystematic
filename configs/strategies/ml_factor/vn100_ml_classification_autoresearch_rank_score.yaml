@@ -1,6 +1,6 @@
 run_id: autoresearch_rank_score
-default_params_path: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/configs/notebooks/stock_ml_e2e_classification/default_params.yaml
-model_weights_path: /Users/s2997726/Desktop/code/quant/QS/QTradeSystematic/.qts_notebooke_runtime/model_weights/stock_ml_e2e_classification/vn_reference_xgb_classifier_baseline_top5_fwd12_rb8_sma42
+default_params_path: ./configs/notebooks/stock_ml_e2e_classification/default_params.yaml
+model_weights_path: ./.qts_notebooke_runtime/model_weights/stock_ml_e2e_classification/vn_reference_xgb_classifier_baseline_top5_fwd12_rb8_sma42
 run:
   forward_period: 12
   classification_window: 120
@@ -19,11 +19,12 @@ features:
   - close_fip_momentum_252
   - close_volatility_annualized_252
 classification:
+  balanced_sample_weight: true
   class_quantiles:
-  - 0.15
-  - 0.45
-  - 0.6
-  - 0.85
+  - 0.1
+  - 0.35
+  - 0.55
+  - 0.75
   class_scores:
   - -2.0
   - -1.0
@@ -37,6 +38,7 @@ signal:
   probability_sum_col: class_3_4_prob
   probability_threshold: 0.3
   min_probability_threshold: null
+  min_predicted_class: 3
   fallback_min_positions: 0
   rank_col: score
 xgb:

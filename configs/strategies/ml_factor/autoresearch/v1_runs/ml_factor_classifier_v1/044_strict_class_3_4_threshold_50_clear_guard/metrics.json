@@ -1,0 +1,11 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/044_strict_class_3_4_threshold_50_clear_guard",
+  "finished_at": "2026-06-28T05:46:37+00:00",
+  "metric_source": "none",
+  "metrics": {},
+  "returncode": 1,
+  "run_id": "044_strict_class_3_4_threshold_50_clear_guard",
+  "timed_out": false,
+  "trial": 44,
+  "wall_seconds": 6.890250850003213
+}

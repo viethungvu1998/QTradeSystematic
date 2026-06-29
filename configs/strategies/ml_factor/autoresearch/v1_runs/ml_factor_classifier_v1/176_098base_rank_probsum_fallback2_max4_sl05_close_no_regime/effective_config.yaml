@@ -1,0 +1,81 @@
+start_date: '2018-01-01'
+end_date: '2026-05-31'
+benchmark: VN:VNINDEX
+initial_capital: 100000000
+commission:
+  rate: 0.0016
+run:
+  min_feature_count: 3
+  forward_period: 12
+  classification_window: 120
+  train_window: 630
+  max_positions: 4
+  rebalance_frequency: 8
+validation:
+  test_intervals:
+  - start_date: '2021-01-01'
+    end_date: '2026-05-30'
+paths:
+  model_weights_dir: .qts_notebooke_runtime/model_weights/stock_ml_e2e_classification
+  effective_yaml_dir: .qts_notebooke_runtime/yaml/stock_ml_e2e_classification
+  report_pdf_dir: output/pdf
+features:
+  selected_groups:
+  - baseline
+  baseline_columns:
+  - close_macd_histogram_50_200_30
+  - close_qsmom_21_252_126
+  - close_roc_0_63
+  - close_roc_0_252
+  - close_rsi_63
+  - close_fip_momentum_252
+  - close_volatility_annualized_252
+  predictor_cols:
+  - close_macd_histogram_50_200_30
+  - close_qsmom_21_252_126
+  - close_roc_0_63
+  - close_roc_0_252
+  - close_rsi_63
+  - close_fip_momentum_252
+  - close_volatility_annualized_252
+classification:
+  class_quantiles:
+  - 0.15
+  - 0.35
+  - 0.55
+  - 0.7
+  class_scores:
+  - -2.0
+  - -1.0
+  - 0.0
+  - 1.0
+  - 3.0
+signal:
+  probability_cols:
+  - class_3_prob
+  - class_4_prob
+  probability_sum_col: class_3_4_prob
+  probability_threshold: 0.45
+  min_probability_threshold: null
+  fallback_min_positions: 2
+  rank_col: class_3_4_prob
+xgb:
+  n_estimators: 10
+  learning_rate: 0.1
+  max_depth: 3
+  n_jobs: -1
+  random_state: 123
+  objective: multi:softprob
+  eval_metric: mlogloss
+  tree_method: hist
+run_id: autoresearch_176_098base_rank_probsum_fallback2_max4_sl05_close_no_regime
+default_params_path: ./configs/notebooks/stock_ml_e2e_classification/default_params.yaml
+model_weights_path: ./.qts_notebooke_runtime/model_weights/stock_ml_e2e_classification/vn_reference_xgb_classifier_baseline_top5_fwd12_rb8_sma42
+benchmark_regime:
+  enabled: false
+  rule: above_sma
+  window: 42
+  min_periods: 14
+backtest:
+  exit_rules:
+    stop_loss: 0.05

@@ -1,0 +1,18 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/vn100_ml_classification_autoresearch_rank_score.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/052_threshold_40_rank_config_fallback3_max7_no_sl",
+    "--run-name=052_threshold_40_rank_config_fallback3_max7_no_sl",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet",
+    "--rank-col=score",
+    "--probability-threshold=0.40",
+    "--fallback-min-positions=3",
+    "--max-positions=7"
+  ],
+  "run_id": "052_threshold_40_rank_config_fallback3_max7_no_sl",
+  "started_at": "2026-06-28T13:41:16+00:00",
+  "trial": 52
+}

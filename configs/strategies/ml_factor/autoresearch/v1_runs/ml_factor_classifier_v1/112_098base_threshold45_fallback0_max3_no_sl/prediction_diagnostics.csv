@@ -1,0 +1,14 @@
+,prediction_diagnostics
+prediction_rows,16415
+prediction_dates,168
+signal_threshold,0.45
+min_predicted_class,
+classification_threshold_scope,classification_window
+balanced_sample_weight,False
+max_signal_probability,0.42686669737547706
+rows_above_signal_threshold,0
+predicted_class_0_rows,14738
+predicted_class_1_rows,640
+predicted_class_2_rows,0
+predicted_class_3_rows,0
+predicted_class_4_rows,1037

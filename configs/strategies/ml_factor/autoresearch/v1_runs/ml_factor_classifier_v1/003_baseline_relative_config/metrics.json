@@ -1,0 +1,17 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/003_baseline_relative_config",
+  "finished_at": "2026-06-28T04:18:24+00:00",
+  "metric_source": "metrics.json",
+  "metrics": {
+    "cagr": 0.17414787685810063,
+    "max_drawdown": 0.2857636208574488,
+    "sharpe": 1.0677473997119353,
+    "sortino": 1.024257930393813,
+    "win_rate": 0.3277671755725191
+  },
+  "returncode": 0,
+  "run_id": "003_baseline_relative_config",
+  "timed_out": false,
+  "trial": 3,
+  "wall_seconds": 18.684417102020234
+}

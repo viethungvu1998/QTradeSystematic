@@ -45,10 +45,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rebalance-frequency", type=int)
     parser.add_argument("--max-positions", type=int)
     parser.add_argument("--probability-threshold", type=float)
+    parser.add_argument("--min-predicted-class", type=int)
+    parser.add_argument("--clear-min-predicted-class", action="store_true")
     parser.add_argument("--fallback-min-positions", type=int)
     parser.add_argument("--rank-col")
+    parser.add_argument("--probability-cols")
+    parser.add_argument("--probability-sum-col")
     parser.add_argument("--class-quantiles")
     parser.add_argument("--class-scores")
+    parser.add_argument(
+        "--classification-threshold-scope",
+        choices=("classification_window", "train"),
+    )
+    parser.add_argument("--balanced-sample-weight", action="store_true")
+    parser.add_argument("--stop-loss", type=float)
+    parser.add_argument("--stop-loss-min-hold", type=int)
+    parser.add_argument("--stop-loss-benchmark-below-sma", action="store_true")
+    parser.add_argument("--take-profit", type=float)
+    parser.add_argument("--trailing-stop", type=float)
+    parser.add_argument("--disable-benchmark-regime", action="store_true")
+    parser.add_argument("--benchmark-regime-window", type=int)
+    parser.add_argument("--benchmark-regime-min-periods", type=int)
+    parser.add_argument("--rebalance-existing-positions", action="store_true")
 
     parser.add_argument("--xgb-n-estimators", type=int)
     parser.add_argument("--xgb-learning-rate", type=float)
@@ -98,14 +116,41 @@ def build_trial_config(args: argparse.Namespace, repo_root: Path) -> tuple[Path,
 
     signal = payload.setdefault("signal", {})
     set_if_present(signal, "probability_threshold", args.probability_threshold)
+    set_if_present(signal, "min_predicted_class", args.min_predicted_class)
+    if args.clear_min_predicted_class:
+        signal.pop("min_predicted_class", None)
     set_if_present(signal, "fallback_min_positions", args.fallback_min_positions)
     set_if_present(signal, "rank_col", args.rank_col)
+    if args.probability_cols:
+        signal["probability_cols"] = [
+            item.strip() for item in args.probability_cols.split(",") if item.strip()
+        ]
+    set_if_present(signal, "probability_sum_col", args.probability_sum_col)
 
     classification = payload.setdefault("classification", {})
     if args.class_quantiles:
         classification["class_quantiles"] = parse_float_list(args.class_quantiles)
     if args.class_scores:
         classification["class_scores"] = parse_float_list(args.class_scores)
+    set_if_present(classification, "threshold_scope", args.classification_threshold_scope)
+    if args.balanced_sample_weight:
+        classification["balanced_sample_weight"] = True
+
+    exit_rules = payload.setdefault("backtest", {}).setdefault("exit_rules", {})
+    set_if_present(exit_rules, "stop_loss", args.stop_loss)
+    set_if_present(exit_rules, "stop_loss_min_hold", args.stop_loss_min_hold)
+    if args.stop_loss_benchmark_below_sma:
+        exit_rules["stop_loss_benchmark_filter"] = "below_sma"
+    set_if_present(exit_rules, "take_profit", args.take_profit)
+    set_if_present(exit_rules, "trailing_stop", args.trailing_stop)
+
+    if args.disable_benchmark_regime:
+        payload.setdefault("benchmark_regime", {})["enabled"] = False
+    benchmark_regime = payload.setdefault("benchmark_regime", {})
+    set_if_present(benchmark_regime, "window", args.benchmark_regime_window)
+    set_if_present(benchmark_regime, "min_periods", args.benchmark_regime_min_periods)
+    if args.rebalance_existing_positions:
+        payload.setdefault("backtest", {})["rebalance_existing_positions"] = True
 
     xgb = payload.setdefault("xgb", {})
     set_if_present(xgb, "n_estimators", args.xgb_n_estimators)

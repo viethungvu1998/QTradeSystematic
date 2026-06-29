@@ -1,0 +1,14 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/vn100_ml_classification2.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/003_baseline_relative_config",
+    "--run-name=003_baseline_relative_config",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet"
+  ],
+  "run_id": "003_baseline_relative_config",
+  "started_at": "2026-06-28T04:18:05+00:00",
+  "trial": 3
+}

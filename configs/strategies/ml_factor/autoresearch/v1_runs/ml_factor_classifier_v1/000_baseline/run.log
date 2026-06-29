@@ -1,0 +1,198 @@
+Traceback (most recent call last):
+  File "/home/hungvu/code/quant/QTradeSystematic/notebooks/ml_factor_classifier.py", line 21, in <module>
+    import vectorbtpro as vbt
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/__init__.py", line 30, in <module>
+    from vectorbtpro._settings import settings
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/_settings.py", line 2288, in <module>
+    settings.reset_theme()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/_settings.py", line 2260, in reset_theme
+    self.set_theme(self["plotting"]["default_theme"])
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/_settings.py", line 2254, in set_theme
+    self.register_template(theme)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/vectorbtpro/_settings.py", line 2245, in register_template
+    pio.templates["vbt_" + theme] = go.layout.Template(template)
+                                    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/graph_objs/layout/_template.py", line 130, in __init__
+    self._set_property("data", arg, data)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/basedatatypes.py", line 4403, in _set_property
+    _set_property_provided_value(self, name, arg, provided)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/basedatatypes.py", line 398, in _set_property_provided_value
+    obj[name] = val
+    ~~~^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/basedatatypes.py", line 4924, in __setitem__
+    self._set_compound_prop(prop, value)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/basedatatypes.py", line 5335, in _set_compound_prop
+    val = validator.validate_coerce(val, skip_invalid=self._skip_invalid)
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/_plotly_utils/basevalidators.py", line 2468, in validate_coerce
+    v = self.data_class(v, skip_invalid=skip_invalid, _validate=_validate)
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/graph_objs/layout/template/_data.py", line 1434, in __init__
+    self._process_kwargs(**dict(arg, **kwargs))
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hungvu/code/quant/QTradeSystematic/.venv/lib/python3.13/site-packages/plotly/basedatatypes.py", line 4451, in _process_kwargs
+    raise err
+ValueError: Invalid property specified for object of type plotly.graph_objs.layout.template.Data: 'heatmapgl'
+
+Did you mean "heatmap"?
+
+    Valid properties:
+        barpolar
+            A tuple of :class:`plotly.graph_objects.Barpolar`
+            instances or dicts with compatible properties
+        bar
+            A tuple of :class:`plotly.graph_objects.Bar` instances
+            or dicts with compatible properties
+        box
+            A tuple of :class:`plotly.graph_objects.Box` instances
+            or dicts with compatible properties
+        candlestick
+            A tuple of :class:`plotly.graph_objects.Candlestick`
+            instances or dicts with compatible properties
+        carpet
+            A tuple of :class:`plotly.graph_objects.Carpet`
+            instances or dicts with compatible properties
+        choroplethmapbox
+            A tuple of
+            :class:`plotly.graph_objects.Choroplethmapbox`
+            instances or dicts with compatible properties
+        choroplethmap
+            A tuple of :class:`plotly.graph_objects.Choroplethmap`
+            instances or dicts with compatible properties
+        choropleth
+            A tuple of :class:`plotly.graph_objects.Choropleth`
+            instances or dicts with compatible properties
+        cone
+            A tuple of :class:`plotly.graph_objects.Cone` instances
+            or dicts with compatible properties
+        contourcarpet
+            A tuple of :class:`plotly.graph_objects.Contourcarpet`
+            instances or dicts with compatible properties
+        contour
+            A tuple of :class:`plotly.graph_objects.Contour`
+            instances or dicts with compatible properties
+        densitymapbox
+            A tuple of :class:`plotly.graph_objects.Densitymapbox`
+            instances or dicts with compatible properties
+        densitymap
+            A tuple of :class:`plotly.graph_objects.Densitymap`
+            instances or dicts with compatible properties
+        funnelarea
+            A tuple of :class:`plotly.graph_objects.Funnelarea`
+            instances or dicts with compatible properties
+        funnel
+            A tuple of :class:`plotly.graph_objects.Funnel`
+            instances or dicts with compatible properties
+        heatmap
+            A tuple of :class:`plotly.graph_objects.Heatmap`
+            instances or dicts with compatible properties
+        histogram2dcontour
+            A tuple of
+            :class:`plotly.graph_objects.Histogram2dContour`
+            instances or dicts with compatible properties
+        histogram2d
+            A tuple of :class:`plotly.graph_objects.Histogram2d`
+            instances or dicts with compatible properties
+        histogram
+            A tuple of :class:`plotly.graph_objects.Histogram`
+            instances or dicts with compatible properties
+        icicle
+            A tuple of :class:`plotly.graph_objects.Icicle`
+            instances or dicts with compatible properties
+        image
+            A tuple of :class:`plotly.graph_objects.Image`
+            instances or dicts with compatible properties
+        indicator
+            A tuple of :class:`plotly.graph_objects.Indicator`
+            instances or dicts with compatible properties
+        isosurface
+            A tuple of :class:`plotly.graph_objects.Isosurface`
+            instances or dicts with compatible properties
+        mesh3d
+            A tuple of :class:`plotly.graph_objects.Mesh3d`
+            instances or dicts with compatible properties
+        ohlc
+            A tuple of :class:`plotly.graph_objects.Ohlc` instances
+            or dicts with compatible properties
+        parcats
+            A tuple of :class:`plotly.graph_objects.Parcats`
+            instances or dicts with compatible properties
+        parcoords
+            A tuple of :class:`plotly.graph_objects.Parcoords`
+            instances or dicts with compatible properties
+        pie
+            A tuple of :class:`plotly.graph_objects.Pie` instances
+            or dicts with compatible properties
+        sankey
+            A tuple of :class:`plotly.graph_objects.Sankey`
+            instances or dicts with compatible properties
+        scatter3d
+            A tuple of :class:`plotly.graph_objects.Scatter3d`
+            instances or dicts with compatible properties
+        scattercarpet
+            A tuple of :class:`plotly.graph_objects.Scattercarpet`
+            instances or dicts with compatible properties
+        scattergeo
+            A tuple of :class:`plotly.graph_objects.Scattergeo`
+            instances or dicts with compatible properties
+        scattergl
+            A tuple of :class:`plotly.graph_objects.Scattergl`
+            instances or dicts with compatible properties
+        scattermapbox
+            A tuple of :class:`plotly.graph_objects.Scattermapbox`
+            instances or dicts with compatible properties
+        scattermap
+            A tuple of :class:`plotly.graph_objects.Scattermap`
+            instances or dicts with compatible properties
+        scatterpolargl
+            A tuple of :class:`plotly.graph_objects.Scatterpolargl`
+            instances or dicts with compatible properties
+        scatterpolar
+            A tuple of :class:`plotly.graph_objects.Scatterpolar`
+            instances or dicts with compatible properties
+        scatter
+            A tuple of :class:`plotly.graph_objects.Scatter`
+            instances or dicts with compatible properties
+        scattersmith
+            A tuple of :class:`plotly.graph_objects.Scattersmith`
+            instances or dicts with compatible properties
+        scatterternary
+            A tuple of :class:`plotly.graph_objects.Scatterternary`
+            instances or dicts with compatible properties
+        splom
+            A tuple of :class:`plotly.graph_objects.Splom`
+            instances or dicts with compatible properties
+        streamtube
+            A tuple of :class:`plotly.graph_objects.Streamtube`
+            instances or dicts with compatible properties
+        sunburst
+            A tuple of :class:`plotly.graph_objects.Sunburst`
+            instances or dicts with compatible properties
+        surface
+            A tuple of :class:`plotly.graph_objects.Surface`
+            instances or dicts with compatible properties
+        table
+            A tuple of :class:`plotly.graph_objects.Table`
+            instances or dicts with compatible properties
+        treemap
+            A tuple of :class:`plotly.graph_objects.Treemap`
+            instances or dicts with compatible properties
+        violin
+            A tuple of :class:`plotly.graph_objects.Violin`
+            instances or dicts with compatible properties
+        volume
+            A tuple of :class:`plotly.graph_objects.Volume`
+            instances or dicts with compatible properties
+        waterfall
+            A tuple of :class:`plotly.graph_objects.Waterfall`
+            instances or dicts with compatible properties
+        
+Did you mean "heatmap"?
+
+Bad property path:
+heatmapgl
+^^^^^^^^^

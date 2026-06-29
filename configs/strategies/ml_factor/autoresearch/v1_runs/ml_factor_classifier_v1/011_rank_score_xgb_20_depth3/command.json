@@ -1,0 +1,17 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/vn100_ml_classification2.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/011_rank_score_xgb_20_depth3",
+    "--run-name=011_rank_score_xgb_20_depth3",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet",
+    "--rank-col=score",
+    "--xgb-n-estimators=20",
+    "--xgb-max-depth=3"
+  ],
+  "run_id": "011_rank_score_xgb_20_depth3",
+  "started_at": "2026-06-28T04:23:14+00:00",
+  "trial": 11
+}

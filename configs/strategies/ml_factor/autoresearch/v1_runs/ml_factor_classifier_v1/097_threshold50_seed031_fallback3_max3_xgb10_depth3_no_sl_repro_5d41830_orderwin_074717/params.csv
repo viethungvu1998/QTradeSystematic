@@ -1,0 +1,17 @@
+,value
+run_id,autoresearch_097_threshold50_seed031_fallback3_max3_xgb10_depth3_no_sl
+config_path,/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/097_threshold50_seed031_fallback3_max3_xgb10_depth3_no_sl_repro_5d41830_orderwin_074717/trial_config.yaml
+start_date,2018-01-01
+end_date,2026-05-31
+benchmark,VN:VNINDEX
+init_cash,100000000.0
+fee_rate,0.0016
+forward_period,12
+train_window,630
+classification_window,120
+rebalance_frequency,8
+max_positions,3
+signal_threshold,0.5
+raw_rows,202669
+raw_symbols,101
+asset_symbols,100

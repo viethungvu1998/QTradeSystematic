@@ -1,0 +1,17 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/143_098base_rank_probsum_max4_classwin180_no_sl",
+  "finished_at": "2026-06-28T15:53:39+00:00",
+  "metric_source": "metrics.json",
+  "metrics": {
+    "cagr": 0.25150202784258013,
+    "max_drawdown": 0.3340917805392517,
+    "sharpe": 1.1029777910402705,
+    "sortino": 1.2723929048568987,
+    "win_rate": 0.5654761904761905
+  },
+  "returncode": 0,
+  "run_id": "143_098base_rank_probsum_max4_classwin180_no_sl",
+  "timed_out": false,
+  "trial": 143,
+  "wall_seconds": 11.421284785028547
+}

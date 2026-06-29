@@ -1,0 +1,4 @@
+Chiến thuật quá tốt, cần kiểm tra có bị overfit không 
+configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/097_threshold50_seed031_fallback3_max3_xgb10_depth3_no_sl
+
+165_098base_rank_probsum_max4_sl05_close_no_regime

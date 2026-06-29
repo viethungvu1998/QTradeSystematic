@@ -1,0 +1,26 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/098_threshold45_scores_top3_quantiles5575_xgb10_max3/trial_config.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/132_098base_threshold45_rank_probsum_max4_sl035_intraday",
+    "--run-name=132_098base_threshold45_rank_probsum_max4_sl035_intraday",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet",
+    "--rank-col=class_3_4_prob",
+    "--probability-threshold=0.45",
+    "--clear-min-predicted-class",
+    "--forward-period=12",
+    "--fallback-min-positions=3",
+    "--max-positions=4",
+    "--rebalance-frequency=8",
+    "--stop-loss=0.035",
+    "--class-quantiles=0.15,0.35,0.55,0.70",
+    "--class-scores=-2,-1,0,1,3",
+    "--xgb-n-estimators=10",
+    "--xgb-max-depth=3"
+  ],
+  "run_id": "132_098base_threshold45_rank_probsum_max4_sl035_intraday",
+  "started_at": "2026-06-28T15:43:42+00:00",
+  "trial": 132
+}

@@ -1,0 +1,20 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/031_rank_score_fallback_3_max_positions_6/trial_config.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/092_threshold50_seed031_fallback3_max3_no_sl",
+    "--run-name=092_threshold50_seed031_fallback3_max3_no_sl",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet",
+    "--rank-col=score",
+    "--probability-threshold=0.50",
+    "--clear-min-predicted-class",
+    "--fallback-min-positions=3",
+    "--max-positions=3",
+    "--class-quantiles=0.15,0.45,0.60,0.85"
+  ],
+  "run_id": "092_threshold50_seed031_fallback3_max3_no_sl",
+  "started_at": "2026-06-28T14:40:19+00:00",
+  "trial": 92
+}

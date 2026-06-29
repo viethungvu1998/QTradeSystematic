@@ -1,0 +1,11 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/046_train_threshold_balanced_diagnostics",
+  "finished_at": "2026-06-28T13:09:36+00:00",
+  "metric_source": "none",
+  "metrics": {},
+  "returncode": 1,
+  "run_id": "046_train_threshold_balanced_diagnostics",
+  "timed_out": false,
+  "trial": 46,
+  "wall_seconds": 8.439635796006769
+}

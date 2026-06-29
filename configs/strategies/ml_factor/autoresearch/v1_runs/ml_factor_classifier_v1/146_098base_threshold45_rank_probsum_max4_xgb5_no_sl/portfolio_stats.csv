@@ -1,0 +1,30 @@
+,value
+Start Index,2018-01-02 00:00:00
+End Index,2026-05-29 00:00:00
+Total Duration,2096 days 00:00:00
+Start Value,100000000.0
+Min Value,88939684.19170187
+Max Value,451158474.54295635
+End Value,378084739.5603497
+Total Return [%],278.0847395603497
+Benchmark Return [%],248.17090848226422
+Position Coverage [%],64.07442748091603
+Max Gross Exposure [%],100.0
+Max Drawdown [%],31.244845317451603
+Max Drawdown Duration,297 days 00:00:00
+Total Orders,554
+Total Fees Paid,42392699.36324678
+Total Trades,278
+Win Rate [%],54.90909090909091
+Best Trade [%],255.0088648648649
+Worst Trade [%],-43.92258064516129
+Avg Winning Trade [%],11.615772092255861
+Avg Losing Trade [%],-7.991079477307092
+Avg Winning Trade Duration,15 days 18:54:50.066225165
+Avg Losing Trade Duration,12 days 04:38:42.580645161
+Profit Factor,1.5671198126499248
+Expectancy,989766.2546521237
+Sharpe Ratio,0.9827693174022103
+Calmar Ratio,0.8341019559840559
+Omega Ratio,1.1834955404815366
+Sortino Ratio,1.3981286670392805

@@ -1,0 +1,16 @@
+,prediction_diagnostics
+prediction_rows,16415
+prediction_dates,168
+signal_threshold,0.5
+min_predicted_class,3
+classification_threshold_scope,train
+balanced_sample_weight,True
+max_signal_probability,0.4881661756063428
+rows_above_signal_threshold,0
+rows_at_min_predicted_class,10821
+rows_passing_entry_filters,0
+predicted_class_0_rows,1038
+predicted_class_1_rows,2733
+predicted_class_2_rows,1823
+predicted_class_3_rows,4898
+predicted_class_4_rows,5923

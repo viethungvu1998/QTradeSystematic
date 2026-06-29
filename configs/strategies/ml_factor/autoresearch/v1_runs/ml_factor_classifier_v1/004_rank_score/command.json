@@ -1,0 +1,15 @@
+{
+  "argv": [
+    ".venv/bin/python",
+    "configs/strategies/ml_factor/autoresearch/run_classifier_trial.py",
+    "--config=configs/strategies/ml_factor/vn100_ml_classification2.yaml",
+    "--output-dir=/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/004_rank_score",
+    "--run-name=004_rank_score",
+    "--data-csv=data/VNSTOCK.csv",
+    "--skip-tearsheet",
+    "--rank-col=score"
+  ],
+  "run_id": "004_rank_score",
+  "started_at": "2026-06-28T04:18:48+00:00",
+  "trial": 4
+}

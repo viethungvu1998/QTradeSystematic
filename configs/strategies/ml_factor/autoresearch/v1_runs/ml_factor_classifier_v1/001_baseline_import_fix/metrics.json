@@ -1,0 +1,11 @@
+{
+  "artifact_dir": "/home/hungvu/code/quant/QTradeSystematic/configs/strategies/ml_factor/autoresearch/v1_runs/ml_factor_classifier_v1/001_baseline_import_fix",
+  "finished_at": "2026-06-28T04:17:13+00:00",
+  "metric_source": "none",
+  "metrics": {},
+  "returncode": 1,
+  "run_id": "001_baseline_import_fix",
+  "timed_out": false,
+  "trial": 1,
+  "wall_seconds": 1.6695135100744665
+}
